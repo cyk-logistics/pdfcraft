@@ -2616,3 +2616,85 @@ key	Space	Space
 	Move to another page	ย้ายไปหน้าอื่น
 	Copy to another page	คัดลอกไปหน้าอื่น
 	Copy object	คัดลอกวัตถุ
+# Upstream 0.9.0 strings (Thai edition).
+	4 x 6 in label (101.6 x 152.4 mm)	ฉลาก 4 x 6 นิ้ว (101.6 x 152.4 มม.)
+	Characters	จำนวนอักขระ
+	Characters without spaces	อักขระไม่รวมช่องว่าง
+	Collapse all pages	ยุบทุกหน้า
+	Counting words… {n} pages read	กำลังนับคำ… อ่านแล้ว {n} หน้า
+	Create Link…	สร้างลิงก์…
+	Crop Image	ครอบตัดรูปภาพ
+	Current page only	เฉพาะหน้าปัจจุบัน
+	Cut Image	ตัดรูปภาพ
+	Cuts each page to its printed area, turns it upright and fits it to the sheet without stretching. One label per sheet.	ตัดแต่ละหน้าให้เหลือเฉพาะส่วนที่พิมพ์ หมุนให้ตั้งตรง และปรับให้พอดีกับแผ่นโดยไม่ยืด หนึ่งฉลากต่อหนึ่งแผ่น
+	DN: 	DN: 
+	Date: 	วันที่: 
+	Digitally signed by	ลงนามแบบดิจิทัลโดย
+	Exclude image/OCR text	ไม่รวมข้อความในรูปภาพ/OCR
+	Exclude tagged code blocks	ไม่รวมบล็อกโค้ดที่ติดแท็ก
+	Exclude tagged tables	ไม่รวมตารางที่ติดแท็ก
+	Exclusions use PDF tags. Untagged tables and code remain included. Image exclusion also removes invisible text.	การไม่รวมใช้แท็กของ PDF ตารางและโค้ดที่ไม่มีแท็กยังคงถูกนับ การไม่รวมรูปภาพจะตัดข้อความที่มองไม่เห็นออกด้วย
+	Expand all pages	ขยายทุกหน้า
+	Fill colour:	สีเติม:
+	Find untagged content	ค้นหาเนื้อหาที่ไม่มีแท็ก
+	Font size	ขนาดฟอนต์
+	Found {n} untagged content problems.	พบปัญหาเนื้อหาที่ไม่มีแท็ก {n} รายการ
+	Full Screen	เต็มหน้าจอ
+	Hide hover previews for highlights without comment text	ซ่อนตัวอย่างเมื่อชี้ของไฮไลต์ที่ไม่มีข้อความความคิดเห็น
+	Location: 	สถานที่: 
+	Make Properties Default	ตั้งคุณสมบัติเป็นค่าเริ่มต้น
+	Make properties default	ตั้งคุณสมบัติเป็นค่าเริ่มต้น
+	Mark as artifact	ทำเครื่องหมายเป็นอาร์ติแฟกต์
+	Mark content as artifact	ทำเครื่องหมายเนื้อหาเป็นอาร์ติแฟกต์
+	Merge image fragments	รวมชิ้นส่วนรูปภาพ
+	Mobile	มือถือ
+	New file only	เฉพาะไฟล์ใหม่
+	New file: {name}	ไฟล์ใหม่: {name}
+	No printers were found. Check that the printer is installed and the print spooler is running, then open Print again.	ไม่พบเครื่องพิมพ์ ตรวจสอบว่าได้ติดตั้งเครื่องพิมพ์และบริการคิวการพิมพ์ (Print Spooler) ทำงานอยู่ แล้วเปิดพิมพ์อีกครั้ง
+	No untagged content was found.	ไม่พบเนื้อหาที่ไม่มีแท็ก
+	Not now	ไม่ใช่ตอนนี้
+	Old file: {name}	ไฟล์เดิม: {name}
+	Opacity:	ความทึบ:
+	Open in Full Screen mode?	เปิดในโหมดเต็มหน้าจอหรือไม่?
+	Optimizing… merging image fragments	กำลังปรับให้เหมาะสม… รวมชิ้นส่วนรูปภาพ
+	Outline colour:	สีเส้นขอบ:
+	Page properties	คุณสมบัติของหน้า
+	Pages counted	จำนวนหน้าที่นับ
+	Pages selected	หน้าที่เลือก
+	Print as image	พิมพ์เป็นรูปภาพ
+	Reason: 	เหตุผล: 
+	Recognize Text…	รู้จำข้อความ…
+	Redact Image	ปิดทับข้อมูลรูปภาพ
+	Redaction mark appearance	ลักษณะที่ปรากฏของเครื่องหมายปิดทับข้อมูล
+	Remove Crop	เอาการครอบตัดออก
+	Remove this leaf tag from reading order and mark its direct content as an artifact	นำแท็กปลายนี้ออกจากลำดับการอ่าน และทำเครื่องหมายเนื้อหาโดยตรงของแท็กเป็นอาร์ติแฟกต์
+	Resolution:	ความละเอียด:
+	Save anyway	บันทึกต่อไป
+	Save over the changed file?	บันทึกทับไฟล์ที่ถูกเปลี่ยนหรือไม่?
+	Scroll speed (mouse wheel and arrow keys)	ความเร็วในการเลื่อน (ล้อเมาส์และปุ่มลูกศร)
+	Sending sheet {s} of {n} to {printer}…	กำลังส่งแผ่นที่ {s} จาก {n} ไปยัง {printer}…
+	Set page transitions	ตั้งค่าการเปลี่ยนหน้า
+	Shown while the pointer is over a mark.	แสดงขณะที่ตัวชี้อยู่เหนือเครื่องหมาย
+	Side by side	เคียงข้างกัน
+	Some content could not be classified safely and was kept in the count.	เนื้อหาบางส่วนจัดประเภทอย่างแน่นอนไม่ได้ จึงยังนับรวมไว้
+	Some pages contain no countable text. Scanned images need OCR first.	บางหน้าไม่มีข้อความที่นับได้ รูปภาพที่สแกนต้องทำ OCR ก่อน
+	Standard	มาตรฐาน
+	Tag form fields	ติดแท็กฟิลด์ฟอร์ม
+	The labels are in English: the signature's font can't draw them in this language.	ป้ายกำกับเป็นภาษาอังกฤษ เพราะฟอนต์ของลายเซ็นวาดภาษานี้ไม่ได้
+	The password must have at least 8 characters.	รหัสผ่านต้องมีอย่างน้อย 8 อักขระ
+	This document asks to open in Full Screen mode: the page fills the screen and nothing else shows. Press Esc at any time to leave it.	เอกสารนี้ขอเปิดในโหมดเต็มหน้าจอ: หน้าจะเต็มจอและไม่แสดงสิ่งอื่น กด Esc เมื่อใดก็ได้เพื่อออก
+	This file changed on disk. Reload shows the new version and drops your unsaved changes; Save replaces it with this version.	ไฟล์นี้ถูกเปลี่ยนบนดิสก์ โหลดใหม่จะแสดงฉบับใหม่และทิ้งการเปลี่ยนแปลงที่ยังไม่บันทึก บันทึกจะแทนที่ไฟล์ด้วยฉบับนี้
+	Trim the picture with its handles; Enter or Done applies	ตัดขอบรูปด้วยจุดจับ กด Enter หรือ เสร็จสิ้น เพื่อใช้
+	Turn upside down (180°)	กลับหัว (180°)
+	Use it when a printer skips text, shading or transparency. The print is no longer searchable text; with Print in grayscale, the pictures are grey.	ใช้เมื่อเครื่องพิมพ์ข้ามข้อความ การไล่เฉด หรือความโปร่งใส งานพิมพ์จะไม่ใช่ข้อความที่ค้นหาได้อีก และเมื่อใช้ร่วมกับพิมพ์เป็นระดับสีเทา รูปภาพจะเป็นสีเทา
+	What takes up the space in this file, by kind of content.	สิ่งที่ใช้พื้นที่ในไฟล์นี้ แยกตามชนิดของเนื้อหา
+	Word count	นับคำ
+	Word counting stopped unexpectedly.	การนับคำหยุดโดยไม่คาดคิด
+	Word count…	นับคำ…
+	Words	จำนวนคำ
+	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	คุณกำลังดูฉบับแก้ไขที่ {rev} ของ “{from}” นี่คือภาพสแนปช็อต: การเปลี่ยนแปลงที่นี่จะไม่มีผลกับต้นฉบับ
+	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	คุณกำลังดูฉบับที่ลงนามของ “{from}” (ฉบับแก้ไขที่ {rev}) นี่คือภาพสแนปช็อต: การเปลี่ยนแปลงที่นี่จะไม่มีผลกับต้นฉบับ
+	the name is not a plain file name	ชื่อนี้ไม่ใช่ชื่อไฟล์ธรรมดา
+	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” ถูกเปลี่ยนบนดิสก์หลังจากเปิดหรือบันทึกครั้งล่าสุด การบันทึกตอนนี้จะแทนที่ฉบับที่ใหม่กว่านั้นด้วยฉบับนี้
+@id	file.word_count	นับคำ…
+theme	Appearance	ลักษณะที่ปรากฏ

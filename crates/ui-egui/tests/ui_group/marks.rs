@@ -27,7 +27,7 @@ fn harness() -> Harness<'static, PdfCraftApp> {
 
 fn marks(h: &Harness<'static, PdfCraftApp>) -> Vec<MarkKind> {
     let s = h.state();
-    s.session.get(s.views[0].id).unwrap().marks.clone()
+    s.session.get(s.views[0].id).unwrap().marks().to_vec()
 }
 
 #[test]
@@ -81,17 +81,18 @@ fn the_edit_panel_removes_a_header_and_the_dialog_chooses_its_font() {
     h.run_steps(4);
     assert_eq!(marks(&h), [MarkKind::HeaderFooter]);
     assert!(h.state().marks_draft.hf.bold);
-    h.get_by_label("Update header & footer…");
-    // The rows sit under Header and footer, below the panel's fold: scroll to them as a user would.
-    h.get_by_label("Remove header & footer").scroll_to_me();
+    // Since upstream 0.9.0 Header and footer opens a menu: Add, Update and Remove.
+    h.get_by_label_contains("Header and footer").scroll_to_me();
     h.run_steps(3);
+    h.get_by_label_contains("Header and footer").click();
+    h.run_steps(3);
+    h.get_by_label("Update header & footer…");
     if let Ok(dir) = std::env::var("PDFCRAFT_SHOT_DIR") {
         h.render().unwrap().save(std::path::Path::new(&dir).join("edit-panel-marks.png")).unwrap();
     }
     h.get_by_label("Remove header & footer").click();
     h.run_steps(3);
     assert!(marks(&h).is_empty());
-    assert!(h.query_by_label("Remove header & footer").is_none());
 }
 
 #[test]

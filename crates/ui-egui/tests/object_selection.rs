@@ -403,7 +403,7 @@ fn added_texts(h: &Harness<'static, PdfCraftApp>) -> Vec<(String, [f64; 4])> {
     app.session
         .get(app.views[0].id)
         .unwrap()
-        .added
+        .added()
         .iter()
         .filter_map(|a| match &a.content {
             pdfcraft_engine::AddedContent::Text(t) => Some((t.text.clone(), t.rect)),

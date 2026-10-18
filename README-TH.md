@@ -4,7 +4,7 @@ PdfCraft ฉบับปรับปรุงให้ใช้งานภา�
 **ฉบับนี้ไม่ใช่ฉบับทางการ** และไม่ได้อยู่ในความดูแลของผู้พัฒนา PdfCraft หากพบปัญหาในฉบับนี้ โปรดแจ้งที่ Issues ของ repository นี้ ไม่ใช่ที่โปรเจกต์ต้นฉบับ
 
 > English: an unofficial Thai edition of PdfCraft (Thai UI, Thai text editing, TH Sarabun PSK,
-> Sarabun and installed-font support). Based on upstream release v0.8.0. Not affiliated with or
+> Sarabun and installed-font support). Based on upstream release v0.9.0. Not affiliated with or
 > endorsed by the PdfCraft authors.
 
 ## มีอะไรเพิ่มจากต้นฉบับ
@@ -71,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File thai\build-windows.ps1
 ถ้าต้องการทำตัวติดตั้งและไฟล์ portable ด้วย ให้ติดตั้ง WiX v5 (`winget install WiXToolset.WiXCLI --version 5.0.2.0`) แล้วสั่ง:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1 -Version 0.8.0-th.2
+powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1 -Version 0.9.0-th.1
 ```
 
 ไฟล์จะอยู่ที่ `dist\release`

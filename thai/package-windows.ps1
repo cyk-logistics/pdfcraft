@@ -1,13 +1,13 @@
 # Builds PdfCraft Thai for Windows x64 and packages it, as the official release does, into
 #   dist\release\pdfcraft-<version>-windows-x64.msi            per-machine installer
 #   dist\release\pdfcraft-<version>-windows-x64-portable.zip   portable (settings beside the exe)
-# both with the OCR models. <version> is the edition's, e.g. 0.8.0-th.2 (the MSI's numeric
+# both with the OCR models. <version> is the edition's, e.g. 0.9.0-th.1 (the MSI's numeric
 # version drops the suffix).
 #
 # Needs, besides what thai\build-windows.ps1 needs: the network (OCR models) and WiX v5
 # (winget install WiXToolset.WiXCLI --version 5.0.2.0, or dotnet tool install -g wix --version 5.0.2).
 #
-#   powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1 -Version 0.8.0-th.2
+#   powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1 -Version 0.9.0-th.1
 
 param(
     [Parameter(Mandatory = $true)] [string] $Version,

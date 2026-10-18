@@ -199,7 +199,7 @@ impl PdfCraftApp {
         }
         let dir = clipboard_dir().ok_or("there is no folder for the copied file")?;
         let path = write_clipboard_file(&dir, name, bytes)?;
-        arboard::Clipboard::new().and_then(|mut c| c.set().file_list(&[path])).map_err(|e| e.to_string())
+        arboard::Clipboard::new().and_then(|mut c| set_clipboard_file(&mut c, &path)).map_err(|e| e.to_string())
     }
 
     #[cfg(target_arch = "wasm32")]
@@ -209,6 +209,15 @@ impl PdfCraftApp {
         }
         Ok(())
     }
+}
+
+/// Puts `path` alone on the system clipboard. On Windows arboard adds a file list to what the
+/// clipboard already holds, so an earlier copy's text would stay with it and ⌘V would paste that
+/// earlier copy (an added picture or comment, by its marker) instead of this file (Thai edition).
+#[cfg(not(target_arch = "wasm32"))]
+fn set_clipboard_file(cb: &mut arboard::Clipboard, path: &std::path::Path) -> Result<(), arboard::Error> {
+    cb.clear()?;
+    cb.set().file_list(&[path])
 }
 
 #[cfg(test)]
@@ -268,6 +277,25 @@ mod tests {
             assert!(write_clipboard_file(&linked, "X p1 img1.png", b"x").is_err());
             let _ = std::fs::remove_file(&linked);
         }
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// A copied file replaces what the clipboard held: an earlier copy's text marker must not stay
+    /// with it, or ⌘V pastes that earlier copy. It uses the real clipboard, so it runs only on
+    /// request: `cargo test -p pdfcraft-ui-egui --lib -- --ignored copied_file_replaces`.
+    #[test]
+    #[cfg(windows)]
+    #[ignore = "uses the system clipboard"]
+    fn copied_file_replaces_the_clipboards_text() {
+        let dir = std::env::temp_dir().join(format!("pdfcraft-clipboard-file-test-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = write_clipboard_file(&dir, "Doc p1 img1.png", b"png").unwrap();
+        let mut cb = arboard::Clipboard::new().unwrap();
+        cb.set_text("[Image]").unwrap();
+        super::set_clipboard_file(&mut cb, &path).unwrap();
+        assert!(cb.get_text().is_err(), "the earlier text is gone");
+        assert_eq!(cb.get().file_list().unwrap().len(), 1);
+        let _ = cb.clear();
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

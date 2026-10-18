@@ -183,13 +183,16 @@ fn font_files(dir: &Path, depth: usize, out: &mut Vec<PathBuf>) {
     }
 }
 
+/// A family found by [`scan`]: its name, the file and face index of each style, and whether it draws Thai.
+type Found = (String, [Option<(PathBuf, u32)>; 4], bool);
+
 fn scan(dirs: &[PathBuf]) -> Vec<InstalledFamily> {
     let mut files = Vec::new();
     for dir in dirs {
         font_files(dir, 3, &mut files);
     }
     // Lowercase name → (name, the file and face index of each style). The first face found wins.
-    let mut found: BTreeMap<String, (String, [Option<(PathBuf, u32)>; 4], bool)> = BTreeMap::new();
+    let mut found: BTreeMap<String, Found> = BTreeMap::new();
     for path in files {
         for face in faces_of(&path) {
             let slot = usize::from(face.bold) | usize::from(face.italic) << 1;
@@ -270,7 +273,7 @@ fn face_at(file: &mut File, offset: u64) -> Option<(String, bool, bool, bool)> {
     let count = usize::from(u16_at(&dir, 4)?).min(128);
     let records = read_at(file, offset + 12, count * 16)?;
     let table = |tag: &[u8; 4]| -> Option<(u64, usize)> {
-        records.chunks_exact(16).find(|r| r.starts_with(tag)).and_then(|r| Some((u64::from(u32_at(r, 8)?), u32_at(r, 12)? as usize)))
+        records.as_chunks::<16>().0.iter().find(|r| r.starts_with(tag)).and_then(|r| Some((u64::from(u32_at(r, 8)?), u32_at(r, 12)? as usize)))
     };
     if table(b"glyf").is_none() && table(b"CFF ").is_none() && table(b"CFF2").is_none() {
         return None;
@@ -354,7 +357,7 @@ fn name_string(names: &[u8], id: u16) -> Option<String> {
         let Some(raw) = names.get(strings.checked_add(offset)?..strings.checked_add(offset)?.checked_add(len)?) else { continue };
         let (rank, text) = match (platform, encoding) {
             (3, 1 | 10) | (0, _) => {
-                let units: Vec<u16> = raw.chunks_exact(2).map(|c| u16::from_be_bytes([c[0], c[1]])).collect();
+                let units: Vec<u16> = raw.as_chunks::<2>().0.iter().map(|c| u16::from_be_bytes(*c)).collect();
                 let Ok(text) = String::from_utf16(&units) else { continue };
                 (
                     if platform == 3 && language == 0x0409 {

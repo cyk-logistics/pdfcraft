@@ -157,7 +157,7 @@ fn dropped_copy(
     let (dx, dy) = (b[0] - a[0], b[1] - a[1]);
     let mut text = match target.kind {
         ObjectKind::Text => crate::edit_text_ui::paragraph_as_added(xf, info, page, doc.text_blocks(page).get(target.index)?)?,
-        ObjectKind::Added => match &doc.added.iter().filter(|a| a.page == page).nth(target.index)?.content {
+        ObjectKind::Added => match &doc.added().iter().filter(|a| a.page == page).nth(target.index)?.content {
             pdfcraft_engine::AddedContent::Text(t) => t.clone(),
             pdfcraft_engine::AddedContent::Image(_) => return None,
         },
@@ -285,7 +285,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
                 } else if view.pending_edit.is_none()
                     && let Some(text) = dropped_copy(xf, info, page, doc, target, rect, gesture.now - gesture.start)
                 {
-                    view.content.select_added = Some((page, doc.added.iter().filter(|a| a.page == page).count()));
+                    view.content.select_added = Some((page, doc.added().iter().filter(|a| a.page == page).count()));
                     view.pending_edit = Some(Edit::AddText { page, text });
                     s.clear();
                 }
@@ -341,7 +341,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
         } else if gesture.copy.is_some() {
             egui::CursorIcon::Copy
         } else {
-            egui::CursorIcon::Grabbing
+            egui::CursorIcon::Move
         });
         return true;
     }
@@ -353,7 +353,7 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
             let union = s.selected.iter().fold(Rect::NOTHING, |r, o| r.union(screen(xf, info, page, o)));
             let edge = s.selected.len() == 1 && on_text_edge(xf, info, page, &s.selected[0], p);
             if union.contains(p) && !edge {
-                ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+                ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
                 return true;
             }
             // Elsewhere the other paragraphs keep their outlines and hover highlight; a press

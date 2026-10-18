@@ -21,6 +21,7 @@ use pdfcraft_cos::{Dict, Document, ObjRef, Object, Stream};
 pub mod codes;
 mod image;
 mod interp;
+mod overlay;
 pub mod patterns;
 pub mod sanitize;
 mod tags;
@@ -46,6 +47,10 @@ pub enum RedactError {
         "page {0} has vertical-writing text while a redaction mark is pending, and PdfCraft cannot tell whether that text lies under the mark yet, so nothing was changed"
     )]
     VerticalText(usize),
+    #[error(
+        "redaction appearance has invalid geometry or exceeds the 8 MiB budget; reduce the marked area, turn off repeated text or apply fewer pages at once (nothing was redacted)"
+    )]
+    OverlayLimit,
     #[error(transparent)]
     Edit(#[from] pdfcraft_edit::EditError),
     #[error(transparent)]
@@ -415,9 +420,16 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
         )));
     }
     let mut report = Report { marks: chosen.len(), ..Report::default() };
-    let mut by_page: Vec<usize> = chosen.iter().map(|m| m.page).collect();
-    by_page.sort_unstable();
-    by_page.dedup();
+    // `marks` visits pages in order. Keep slices of that order for appearance generation,
+    // content rewriting and verification instead of scanning all marks for every page.
+    let groups: Vec<_> = chosen.chunk_by(|a, b| a.page == b.page).filter_map(|group| group.first().map(|mark| (mark.page, group))).collect();
+    let by_page: Vec<_> = groups.iter().map(|(page, _)| *page).collect();
+    // Budget failures must leave even a direct library caller's document untouched.
+    let mut remaining = overlay::MAX_BYTES;
+    let overlays = groups
+        .iter()
+        .map(|&(pi, page_marks)| overlay::content(page_marks, &mut remaining).map(|content| (pi, content)))
+        .collect::<Result<Vec<_>, _>>()?;
     report.pages = by_page.len();
     localize_resources(doc, &by_page)?;
     let mut doomed_fields: Vec<String> = Vec::new();
@@ -426,9 +438,8 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     let widget_owner: Vec<(ObjRef, String)> =
         pdfcraft_forms::fields(doc).into_iter().flat_map(|f| f.widgets.iter().map(|w| (w.obj, f.name.clone())).collect::<Vec<_>>()).collect();
 
-    for &pi in &by_page {
+    for &(pi, page_marks) in &groups {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);
-        let page_marks: Vec<&Mark> = chosen.iter().copied().filter(|m| m.page == pi).collect();
         let rects: Vec<[f64; 4]> = page_marks.iter().flat_map(|m| m.rects.iter().copied()).collect();
 
         // 1. Content.
@@ -490,7 +501,8 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
             // Tags must not keep what the page no longer shows.
             let after = doc.get(page.obj).as_dict().cloned().unwrap_or_default();
             let (_, new_data) = page_streams(doc, &after, pi)?;
-            let (changed_ids, empty_ids) = tags::touched(doc, &resources, &data.join(&b'\n'), &new_data.join(&b'\n'));
+            let (changed_ids, empty_ids) =
+                tags::touched(doc, &resources, pdfcraft_content::Pieces::join(&data).data(), pdfcraft_content::Pieces::join(&new_data).data());
             report.tags += tags::clean(doc, page.obj, None, &changed_ids, &empty_ids)?;
         }
 
@@ -560,38 +572,21 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
     // 3b. An XFA form mirrors its field values in the /XFA datasets packet, and a relayout
     // rebuilds fields and pages from that packet, so deleting the AcroForm field alone leaves the
     // redacted value in the file and lets a later relayout put it back. Once redactions are
-    // applied the form stops being XFA: drop /AcroForm /XFA (template and datasets), the catalog's
-    // /NeedsRendering, and PdfCraft's own layout mark (pdfcraft_xfa::LAYOUT_KEY), leaving a plain
-    // already-laid-out AcroForm that neither the saved file nor a relayout can restore from.
-    if let Some(root) = doc.root() {
-        let strip_xfa = |d: &mut Dict| {
-            d.remove(b"XFA");
-            d.remove(b"PCXfaLayout");
-        };
-        match doc.get(root).as_dict().and_then(|d| d.get(b"AcroForm").cloned()) {
-            Some(Object::Ref(af)) if doc.get(af).as_dict().is_some_and(|d| d.contains(b"XFA")) => {
-                doc.update_dict(af, strip_xfa)?;
-                doc.update_dict(root, |d| {
-                    d.remove(b"NeedsRendering");
-                })?;
-                report.xfa_removed = true;
-            }
-            Some(Object::Dict(mut af)) if af.contains(b"XFA") => {
-                strip_xfa(&mut af);
-                doc.update_dict(root, |d| {
-                    d.set(b"AcroForm".to_vec(), Object::Dict(af));
-                    d.remove(b"NeedsRendering");
-                })?;
-                report.xfa_removed = true;
-            }
-            _ => {}
-        }
+    // applied the form stops being XFA: the packets, /NeedsRendering, the layout mark and the
+    // rest go (pdfcraft_xfa::strip), leaving a plain already-laid-out AcroForm that neither the
+    // saved file nor a relayout can restore from.
+    if pdfcraft_xfa::xfa_shape(doc).is_some() {
+        let r = pdfcraft_xfa::strip(doc).map_err(|e| pdfcraft_edit::EditError::Invalid(e.to_string()))?;
+        report.xfa_removed = !r.packets.is_empty();
     }
 
     // 4. The boxes.
-    for &pi in &by_page {
+    for (pi, content) in overlays {
+        // Thai overlay text is drawn shaped in TH Sarabun PSK, with Type 3 fonts the page needs
+        // (Thai edition); upstream's overlay writer draws it in a standard font.
         let page_marks: Vec<&Mark> = chosen.iter().copied().filter(|m| m.page == pi).collect();
-        let (content, fonts) = overlay_content(doc, pi, &page_marks)?;
+        let thai = pdfcraft_fonts::thai_text::available() && page_marks.iter().any(|m| pdfcraft_fonts::thai_text::has_thai(&m.overlay));
+        let (content, fonts) = if thai { overlay_content(doc, pi, &page_marks)? } else { (content, Vec::new()) };
         if !content.is_empty() {
             pdfcraft_edit::stamp(doc, pi, "Redaction", content)?;
             pdfcraft_edit::add_page_fonts(doc, pi, &fonts)?;
@@ -604,9 +599,9 @@ pub fn apply(doc: &mut Document, pages: Option<&[usize]>) -> Result<Report, Reda
 
     // 5. Verify: nothing readable may remain under a region.
     let mut residue = 0;
-    for &pi in &by_page {
+    for &(pi, page_marks) in &groups {
         let page = pdfcraft_model::pages(doc).swap_remove(pi);
-        let rects: Vec<[f64; 4]> = chosen.iter().filter(|m| m.page == pi).flat_map(|m| m.rects.iter().copied()).collect();
+        let rects: Vec<[f64; 4]> = page_marks.iter().flat_map(|m| m.rects.iter().copied()).collect();
         let (list, data) = page_streams(doc, &page.dict, pi)?;
         // The overlay stream (last) draws text of its own: the overlay label is allowed.
         let original: Vec<Vec<u8>> = list
