@@ -3070,6 +3070,44 @@ fn one_click_selects_a_paragraph_the_arrows_move_it_and_a_double_click_opens_it(
     assert_eq!(h.state().views[0].line_editor.as_ref().map(|e| e.text.as_str()), Some("Page 1"));
 }
 
+/// Delete removes a paragraph of the page's text selected with one click, as one undo step
+/// (Thai edition); in the open editor it deletes a character instead.
+#[test]
+fn delete_removes_a_selected_paragraph_and_undo_brings_it_back() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    let texts = |h: &Harness<'static, PdfCraftApp>| dragged_paragraphs(h).into_iter().map(|b| b.text).collect::<Vec<_>>();
+    assert_eq!(texts(&h), ["Page 1"]);
+    h.hover_at(at);
+    h.run_steps(1);
+    h.drag_at(at);
+    h.run_steps(1);
+    h.drop_at(at);
+    h.run_steps(3);
+    h.get_by_label("Drag the selection to move it. Esc clears the selection.");
+    h.key_press(Key::Delete);
+    h.run_steps(4);
+    assert!(texts(&h).is_empty(), "the paragraph is gone: {:?}", texts(&h));
+    assert!(h.query_by_label("Drag the selection to move it. Esc clears the selection.").is_none(), "nothing stays selected");
+    assert!(h.state_mut().execute("edit.undo"));
+    h.run_steps(3);
+    assert_eq!(texts(&h), ["Page 1"], "one undo step brings it back");
+
+    // Open for typing, Delete is the editor's: the paragraph stays.
+    h.hover_at(at);
+    h.run_steps(1);
+    double_click(&mut h, at);
+    h.run_steps(3);
+    assert!(h.state().views[0].line_editor.is_some());
+    h.key_press(Key::Delete);
+    h.run_steps(3);
+    assert!(h.state().views[0].line_editor.is_some(), "the editor stays open");
+    assert_eq!(texts(&h), ["Page 1"], "the page's paragraph is untouched while it is being typed in");
+}
+
 /// Two clicks in a row at `at`: in Edit text, one click selects a paragraph and a double click
 /// opens it for typing.
 #[test]
