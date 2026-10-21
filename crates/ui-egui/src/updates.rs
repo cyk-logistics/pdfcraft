@@ -11,8 +11,9 @@ use egui::{Align, Layout};
 
 use crate::{PdfCraftApp, theme, widgets};
 
-/// Where every PdfCraft release is listed.
-pub const RELEASES_PAGE: &str = "https://github.com/storytold/pdfcraft/releases";
+/// Where every release of the Thai edition is listed (Thai edition: its own repository, not
+/// upstream's, so the check offers the edition's next release).
+pub const RELEASES_PAGE: &str = "https://github.com/mixlnwuu/pdfcraft/releases";
 
 /// The latest published release.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -27,22 +28,35 @@ pub struct Release {
 pub type UpdateSource = Arc<dyn Fn() -> Result<Release, String> + Send + Sync>;
 
 /// Whether release `latest` (a tag such as `v0.2.0`) is newer than version `current` (`0.1.1`).
-/// Pre-release and build suffixes are ignored; a version that doesn't parse is never newer.
+/// A Thai edition suffix `-th.N` counts after the numbers (`0.10.1-th.2` is newer than
+/// `0.10.1-th.1`, which is newer than `0.10.1`); other pre-release and build suffixes are
+/// ignored. A version that doesn't parse is never newer.
 pub fn is_newer(latest: &str, current: &str) -> bool {
     matches!((parse(latest), parse(current)), (Some(l), Some(c)) if l > c)
 }
 
-fn parse(v: &str) -> Option<(u64, u64, u64)> {
+fn parse(v: &str) -> Option<(u64, u64, u64, u64)> {
     let v = v.trim().trim_start_matches(['v', 'V']);
-    let core = v.split(['-', '+']).next()?;
+    let (core, suffix) = match v.split_once(['-', '+']) {
+        Some((core, suffix)) => (core, Some(suffix)),
+        None => (v, None),
+    };
     let mut parts = core.split('.');
     let mut next = |required: bool| match parts.next() {
         Some(p) => p.parse::<u64>().ok(),
         None if required => None,
         None => Some(0),
     };
-    let version = (next(true)?, next(false)?, next(false)?);
-    parts.next().is_none().then_some(version)
+    let (major, minor, patch) = (next(true)?, next(false)?, next(false)?);
+    if parts.next().is_some() {
+        return None;
+    }
+    // The Thai edition's release number (Thai edition); a `-th.` that isn't one is no version.
+    let edition = match suffix.and_then(|s| s.strip_prefix("th.")) {
+        Some(n) => n.split(['-', '+']).next()?.parse::<u64>().ok()?,
+        None => 0,
+    };
+    Some((major, minor, patch, edition))
 }
 
 /// Where a check is.
@@ -113,7 +127,8 @@ pub(crate) fn dialog(app: &mut PdfCraftApp, ctx: &egui::Context) {
         return;
     }
     let t = theme::Tokens::get(ctx);
-    let current = env!("CARGO_PKG_VERSION");
+    // The edition's own version, with its -th.N (Thai edition).
+    let current = pdfcraft_engine::build_info::edition_version();
     let mut close = false;
     let mut download: Option<String> = None;
     let modal = crate::widgets::show_modal(ctx, "updates", |ui| {
