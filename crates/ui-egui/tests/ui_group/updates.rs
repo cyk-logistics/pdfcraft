@@ -9,7 +9,7 @@ use pdfcraft_ui_egui::updates::{Release, UpdateSource, is_newer};
 
 fn source(answer: Result<&str, &str>) -> UpdateSource {
     let answer = answer.map(str::to_string).map_err(str::to_string);
-    Arc::new(move || answer.clone().map(|v| Release { url: format!("https://github.com/storytold/pdfcraft/releases/tag/{v}"), version: v }))
+    Arc::new(move || answer.clone().map(|v| Release { url: format!("https://github.com/mixlnwuu/pdfcraft/releases/tag/{v}"), version: v }))
 }
 
 fn harness(answer: Result<&str, &str>) -> Harness<'static, PdfCraftApp> {
@@ -48,6 +48,43 @@ fn versions_compare_by_number() {
     assert!(!is_newer("nightly", "0.1.1"), "a tag that isn't a version is never newer");
     assert!(!is_newer("v1.2.3.4", "0.1.1"));
     assert!(!is_newer("v99999999999999999999.0.0", "0.1.1"), "out of range");
+}
+
+/// The edition's -th.N counts after the numbers (Thai edition).
+#[test]
+fn thai_edition_releases_compare_by_their_number() {
+    assert!(is_newer("v0.10.1-th.2", "0.10.1-th.1"));
+    assert!(is_newer("v0.10.1-th.10", "0.10.1-th.9"));
+    assert!(is_newer("v0.10.1-th.1", "0.10.1"));
+    assert!(is_newer("v0.11.0-th.1", "0.10.1-th.3"));
+    assert!(is_newer("v0.10.1-th.2+build.7", "0.10.1-th.1"));
+    assert!(!is_newer("v0.10.1-th.1", "0.10.1-th.1"));
+    assert!(!is_newer("v0.10.1-th.1", "0.10.1-th.2"));
+    assert!(!is_newer("v0.10.1", "0.10.1-th.1"), "the upstream release an edition is built on is not newer");
+    assert!(!is_newer("v0.9.0-th.5", "0.10.1-th.1"));
+    assert!(!is_newer("v0.10.1-th.x", "0.10.1-th.1"), "a -th. without a number is no version");
+}
+
+/// The dialog compares with the edition's own version, -th.N included (Thai edition).
+#[test]
+fn the_next_thai_edition_release_is_offered_and_this_one_is_up_to_date() {
+    let current = pdfcraft_engine::build_info::edition_version();
+    let (base, n) = current.rsplit_once("-th.").expect("the edition version has a -th.N");
+    let next = format!("v{base}-th.{}", n.parse::<u64>().expect("a number") + 1);
+    let mut h = harness(Ok(&next));
+    h.state_mut().execute("help.check_updates");
+    settle(&mut h);
+    h.get_by_label_contains(&format!("PdfCraft {} is available", next.trim_start_matches('v')));
+    h.get_by_label_contains(&format!("You have version {current}."));
+    h.get_by_label("Download");
+
+    for same in [format!("v{current}"), format!("v{base}")] {
+        let mut h = harness(Ok(&same));
+        h.state_mut().execute("help.check_updates");
+        settle(&mut h);
+        h.get_by_label_contains(&format!("PdfCraft {current} is up to date"));
+        assert!(h.query_by_label("Download").is_none(), "{same}");
+    }
 }
 
 #[test]
@@ -89,7 +126,7 @@ fn nothing_is_asked_until_the_user_checks() {
         let counted = counted.clone();
         app.update_source = Some(Arc::new(move || {
             counted.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            Ok(Release { version: "v99.0.0".into(), url: "https://github.com/storytold/pdfcraft/releases/tag/v99.0.0".into() })
+            Ok(Release { version: "v99.0.0".into(), url: "https://github.com/mixlnwuu/pdfcraft/releases/tag/v99.0.0".into() })
         }));
         app
     });

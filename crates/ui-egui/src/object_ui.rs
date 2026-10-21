@@ -512,6 +512,28 @@ pub(crate) fn nudge_keys(ctx: &egui::Context, view: &mut DocView, doc: &Document
     }
 }
 
+/// Delete (or Backspace) removes the one selected paragraph of the page's own text (Thai
+/// edition): it is rewritten empty, one undo step. Pictures and added items have their own Delete
+/// (edit_text_ui, content_ui). A selection of several objects is left alone: removing one
+/// paragraph renumbers the ones after it.
+pub(crate) fn delete_keys(ctx: &egui::Context, view: &mut DocView) {
+    if ctx.egui_wants_keyboard_input() || view.pending_edit.is_some() || view.line_editor.is_some() || view.objects.gesture.is_some() {
+        return;
+    }
+    let Some(page) = view.objects.page else { return };
+    let [one] = view.objects.selected.as_slice() else { return };
+    if one.target.kind != ObjectKind::Text {
+        return;
+    }
+    let block = one.target.index;
+    use egui::{Key, Modifiers};
+    if !ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace)) {
+        return;
+    }
+    view.objects.clear();
+    view.pending_edit = Some(Edit::EditTextBlock { page, block, text: String::new(), style: Default::default() });
+}
+
 pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, selection: &ObjectSelection) {
     if selection.page != Some(page) {
         return;

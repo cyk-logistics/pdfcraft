@@ -4,7 +4,7 @@ PdfCraft ฉบับปรับปรุงให้ใช้งานภา�
 **ฉบับนี้ไม่ใช่ฉบับทางการ** และไม่ได้อยู่ในความดูแลของผู้พัฒนา PdfCraft หากพบปัญหาในฉบับนี้ โปรดแจ้งที่ Issues ของ repository นี้ ไม่ใช่ที่โปรเจกต์ต้นฉบับ
 
 > English: an unofficial Thai edition of PdfCraft (Thai UI, Thai text editing, TH Sarabun PSK,
-> Sarabun and installed-font support). Based on upstream release v0.9.0. Not affiliated with or
+> Sarabun and installed-font support). Based on upstream release v0.10.1. Not affiliated with or
 > endorsed by the PdfCraft authors.
 
 ## มีอะไรเพิ่มจากต้นฉบับ
@@ -29,6 +29,12 @@ PdfCraft ฉบับปรับปรุงให้ใช้งานภา�
 - **เมนูแก้ไขข้อความและรูปภาพ:**
   - คลิก 1 ครั้งเพื่อเลือกกล่องข้อความหรือรูปภาพ แล้วลากเมาส์หรือกดลูกศรเพื่อขยับ
   - ดับเบิลคลิกที่กล่องข้อความเพื่อแก้ไขข้อความ
+  - เลือกกล่องข้อความเดิมของไฟล์แล้วกด **Delete** เพื่อลบ (กด Ctrl+Z ย้อนกลับได้)
+- **ลายน้ำเลือกแบบอักษรได้** (รวม TH Sarabun PSK และฟอนต์ในเครื่อง) พร้อมตัวหนาและตัวเอียง
+- **จัดลำดับชั้น** (คลิกขวา › จัดลำดับ หรือ Ctrl+] / Ctrl+[) สำหรับกล่องข้อความ รูปภาพ และความคิดเห็น
+- **เส้นช่วยจัดกึ่งกลางหน้าเหมือน Word** (กด Alt ค้างไว้ถ้าไม่ต้องการให้ดูด)
+- **คัดลอก/วาง** ความคิดเห็นและรูปภาพ วางรูปจากคลิปบอร์ดหรือไฟล์ใน Explorer และ**ลากข้ามหน้า**ได้ (กด Ctrl ค้างเพื่อคัดลอกข้ามหน้า)
+- **ตรวจหาการอัปเดต** (เมนูช่วยเหลือ) แจ้งรุ่นใหม่ของฉบับภาษาไทย ไม่ใช่รุ่นของทางการ
 
 ## ดาวน์โหลดและติดตั้ง (Windows 64 บิต)
 
@@ -71,8 +77,10 @@ powershell -ExecutionPolicy Bypass -File thai\build-windows.ps1
 ถ้าต้องการทำตัวติดตั้งและไฟล์ portable ด้วย ให้ติดตั้ง WiX v5 (`winget install WiXToolset.WiXCLI --version 5.0.2.0`) แล้วสั่ง:
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1 -Version 0.9.0-th.1
+powershell -ExecutionPolicy Bypass -File thai\package-windows.ps1
 ```
+
+เลขรุ่นของตัวติดตั้งมาจากไฟล์ `thai\VERSION` (เช่น `0.10.1-th.1`) ซึ่งโปรแกรมใช้แสดงในหน้า "เกี่ยวกับ" และใช้ตรวจหาการอัปเดตด้วย
 
 ไฟล์จะอยู่ที่ `dist\release`
 

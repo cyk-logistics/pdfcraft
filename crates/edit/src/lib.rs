@@ -8,7 +8,8 @@
 //! `/PCMark` entry (also in the stream dictionary) names the kind of mark, which is how Update and
 //! Remove find them again without decompressing page content. When
 //! anything is drawn on top, the page's original content is wrapped in `q … Q` (two tiny streams)
-//! so its graphics state can't leak into the mark.
+//! so its graphics state cannot reach the mark. The closing stream also ends known unfinished
+//! marked-content sequences before the new mark.
 //!
 //! Text uses standard Helvetica (WinAnsi) added to the page resources as `/PCHelv`.
 
@@ -158,6 +159,11 @@ pub struct Watermark {
     pub behind: bool,
     /// Offset of the centre from the page centre, in points (right, up).
     pub offset: [f64; 2],
+    /// The font of a text watermark: a standard family, TH Sarabun PSK or an installed family, as
+    /// Add text offers (Thai edition).
+    pub family: Family,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 impl Watermark {
@@ -167,7 +173,30 @@ impl Watermark {
         match self.source {
             Some(_) => None,
             // Thai edition: Thai is drawn in TH Sarabun PSK.
-            None => self.text.trim().lines().find_map(first_undrawable_char),
+            None if self.plain() => self.text.trim().lines().find_map(first_undrawable_char),
+            // A chosen font draws what its face has; the rest as its standard family, like Add text.
+            None => self.text.trim().lines().find_map(|l| added::first_undrawable(&self.item(l, 12.0, 1.0e6))),
+        }
+    }
+
+    /// Whether the text is drawn in plain Helvetica (`/PCHelv`), as before fonts could be chosen
+    /// (Thai edition).
+    fn plain(&self) -> bool {
+        self.family == Family::Helvetica && !self.bold && !self.italic
+    }
+
+    /// `text` as a centred Add-text item in this font at `size`, `width` wide, its top on the
+    /// x axis (the watermark's own space, before it is turned and moved).
+    fn item(&self, text: &str, size: f64, width: f64) -> AddedText {
+        AddedText {
+            rect: [-width / 2.0, -size, width / 2.0, 0.0],
+            text: text.to_owned(),
+            family: self.family,
+            bold: self.bold,
+            italic: self.italic,
+            size,
+            color: self.color,
+            align: Align::Center,
         }
     }
 }
@@ -184,6 +213,9 @@ impl Default for Watermark {
             rotation: 45.0,
             behind: false,
             offset: [0.0; 2],
+            family: Family::Helvetica,
+            bold: false,
+            italic: false,
         }
     }
 }
@@ -378,12 +410,16 @@ const WRAP_OPEN: &[u8] = b"q %PdfCraft\n";
 const WRAP_CLOSE: &[u8] = b"\nQ %PdfCraft\n";
 const OLD_WRAP_CLOSE: &[u8] = b"Q %PdfCraft\n";
 
-/// Whether `bytes` are a wrapper's close: [`WRAP_CLOSE`] after a `Q` for each `q` the wrapped
-/// content left open, or [`OLD_WRAP_CLOSE`].
+/// Whether `bytes` are a wrapper's close: canonical `EMC` closures, then the existing
+/// graphics closures. Legacy closes without the leading newline remain valid on their own.
 fn is_wrap_close(bytes: &[u8]) -> bool {
     let mut rest = bytes;
+    while let Some(shorter) = rest.strip_prefix(b"\nEMC".as_slice()) {
+        rest = shorter;
+    }
+    let legacy = rest.len() == bytes.len();
     loop {
-        if rest == WRAP_CLOSE || rest == OLD_WRAP_CLOSE {
+        if rest == WRAP_CLOSE || (legacy && rest == OLD_WRAP_CLOSE) {
             return true;
         }
         match rest.strip_prefix(b"\nQ".as_slice()) {
@@ -433,11 +469,13 @@ enum Isolation {
     /// `suffix`: the stream from which the content leaves graphics state set (or a comment open)
     /// that a mark on top must not inherit, so it needs a wrapper from there to the end.
     /// `wrappers`: PdfCraft wrapper pairs (open, close) as stream indexes.
-    Clean { suffix: Option<usize>, wrappers: Vec<(usize, usize)> },
+    /// `marked`: unfinished marked-content sequences to close before a new mark.
+    Clean { suffix: Option<usize>, wrappers: Vec<(usize, usize)>, marked: usize },
     /// The content could not be read that precisely (it doesn't decode, is too large, or has
     /// stray bytes, unbalanced `q`/`Q` or an unfinished text object or path). `unclosed` is
-    /// the count of `q` left open at the end, when known.
-    Unknown { unclosed: usize },
+    /// the count of `q` left open at the end, when known. `marked` counts known unfinished
+    /// marked-content sequences independently of graphics malformation, or zero when unknown.
+    Unknown { unclosed: usize, marked: usize },
 }
 
 const ISOLATION_MAX_STREAMS: usize = 100_000;
@@ -446,7 +484,7 @@ const ISOLATION_MAX_OPS: usize = 1_000_000;
 const ISOLATION_MAX_DEPTH: usize = 10_000;
 
 fn isolation(doc: &Document, list: &[Object]) -> Isolation {
-    let unknown = Isolation::Unknown { unclosed: 0 };
+    let unknown = Isolation::Unknown { unclosed: 0, marked: 0 };
     if list.len() > ISOLATION_MAX_STREAMS {
         return unknown;
     }
@@ -468,14 +506,17 @@ fn isolation(doc: &Document, list: &[Object]) -> Isolation {
     let edges = pieces.comment_edges(&parsed);
     let (mut text_open, mut path_open, mut dirty, mut malformed) = (false, false, false, false);
     let mut stack: Vec<usize> = Vec::new();
+    let (mut marked, mut marked_known) = (0usize, true);
     let mut split = 0;
     let mut previous_last = None;
     let mut wrappers = Vec::new();
     for op in &parsed.ops {
         let (first, last) = pieces.pieces_of(op);
-        // A wrapper can only go in before a whole stream, at the top level, between operators,
-        // and where no comment runs into the stream (it would swallow the wrapper's `q`).
+        // A wrapper can only go in before a whole stream, outside graphics and marked-content
+        // scopes, between operators, where no comment would swallow the wrapper's `q`.
         if stack.is_empty()
+            && marked_known
+            && marked == 0
             && !text_open
             && !path_open
             && !dirty
@@ -485,6 +526,26 @@ fn isolation(doc: &Document, list: &[Object]) -> Isolation {
             split = first;
         }
         previous_last = Some(last);
+        // Match the reader's tolerant operands: BMC uses the last name, BDC the last
+        // name/object pair, and EMC ignores surplus operands. Invalid begins are ignored.
+        let begin_marked = match op.op.as_slice() {
+            b"BMC" => op.operands.last().is_some_and(|o| matches!(o, Object::Name(_))),
+            b"BDC" => op.operands.len().checked_sub(2).and_then(|i| op.operands.get(i)).is_some_and(|o| matches!(o, Object::Name(_))),
+            _ => false,
+        };
+        if marked_known {
+            if begin_marked {
+                if marked < ISOLATION_MAX_DEPTH {
+                    marked += 1;
+                } else {
+                    // Once the budget is exceeded, later EMCs cannot restore a known depth.
+                    marked_known = false;
+                    marked = 0;
+                }
+            } else if op.is("EMC") {
+                marked = marked.saturating_sub(1);
+            }
+        }
         match op.op.as_slice() {
             b"BT" if !text_open => text_open = true,
             b"ET" if text_open => text_open = false,
@@ -514,11 +575,11 @@ fn isolation(doc: &Document, list: &[Object]) -> Isolation {
             _ => {}
         }
     }
-    if malformed || text_open || path_open || !stack.is_empty() {
-        return Isolation::Unknown { unclosed: if malformed { 0 } else { stack.len() } };
+    if malformed || text_open || path_open || !stack.is_empty() || !marked_known {
+        return Isolation::Unknown { unclosed: if malformed { 0 } else { stack.len() }, marked };
     }
     let comment_open = edges.last().is_some_and(|edge| edge.1);
-    Isolation::Clean { suffix: (dirty || comment_open).then_some(split), wrappers }
+    Isolation::Clean { suffix: (dirty || comment_open || marked != 0).then_some(split), wrappers, marked }
 }
 
 /// Put a mark's content on a page: behind (prepended) or on top (appended, after wrapping the
@@ -530,21 +591,22 @@ fn place(doc: &mut Document, page: &pdfcraft_model::Page, kind: MarkKind, conten
 /// Put content on a page, tagged `tag` (see [`place`]). On top, whatever graphics state the
 /// content before leaves set (a `cm`, a clip, text state…) must not reach the mark, including
 /// content appended after an earlier PdfCraft wrapper by another tool (#3084): the stretch of
-/// content that leaves state set is wrapped in q/Q, once.
+/// content that leaves state set is wrapped in q/Q, once. Any known unfinished marked-content
+/// sequences are closed at the end too, so hidden optional content cannot hide the new mark.
 fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, content: Vec<u8>, behind: bool) -> Result<(), EditError> {
     let mut list = contents(doc, page)?;
     let wrap = if behind {
         None
     } else {
         match isolation(doc, &list) {
-            Isolation::Clean { suffix, .. } => suffix.map(|split| (split, 0)),
+            Isolation::Clean { suffix, marked, .. } => suffix.map(|split| (split, 0, marked)),
             // Content that can't be read precisely is wrapped whole, as before: after the
             // behind-marks at the start. A `q` it leaves open is closed at its end, where
             // closing it changes nothing already drawn.
-            Isolation::Unknown { unclosed } => {
+            Isolation::Unknown { unclosed, marked } => {
                 let behind_kinds = [MarkKind::Background.tag(), MarkKind::Watermark.tag()];
                 let split = list.iter().position(|o| !stream_tag(doc, o).is_some_and(|t| behind_kinds.contains(&t.as_str()))).unwrap_or(list.len());
-                (split < list.len()).then_some((split, unclosed))
+                (split < list.len()).then_some((split, unclosed, marked))
             }
         }
     };
@@ -552,8 +614,9 @@ fn place_tagged(doc: &mut Document, page: &pdfcraft_model::Page, tag: &str, cont
     if behind {
         list.insert(0, mark);
     } else {
-        if let Some((split, unclosed)) = wrap {
-            let mut close_bytes = b"\nQ".repeat(unclosed);
+        if let Some((split, unclosed, marked)) = wrap {
+            let mut close_bytes = b"\nEMC".repeat(marked);
+            close_bytes.extend_from_slice(&b"\nQ".repeat(unclosed));
             close_bytes.extend_from_slice(WRAP_CLOSE);
             let open = Object::Ref(doc.add(Object::Stream(Stream::from_raw(tagged("Wrap"), WRAP_OPEN.to_vec()))));
             let close = Object::Ref(doc.add(Object::Stream(Stream::from_raw(tagged("Wrap"), close_bytes))));
@@ -866,6 +929,10 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
             place(doc, page, MarkKind::Watermark, content.into_bytes(), wm.behind)?;
             continue;
         }
+        if !wm.plain() {
+            watermark_in_font(doc, i, &page, (w, h), wm, &lines, opacity)?;
+            continue;
+        }
         let widest = lines.iter().map(|l| page_text_width(l, 1.0)).fold(0.0, f64::max).max(0.01);
         let size = if wm.font_size > 0.0 { wm.font_size } else { ((w * w + h * h).sqrt() * 0.5 / widest).clamp(6.0, 300.0) };
         let (s, c) = wm.rotation.to_radians().sin_cos();
@@ -901,6 +968,47 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
         place(doc, page, MarkKind::Watermark, content, wm.behind)?;
     }
     Ok(())
+}
+
+/// A text watermark in a chosen font on page `i` (`page`, `w` × `h` displayed), drawn as Add text
+/// draws it (Thai edition): the lines centred on the page centre plus the offset, turned by the
+/// rotation, at the font size or, for 0, about half the page diagonal.
+#[allow(clippy::too_many_arguments)]
+fn watermark_in_font(
+    doc: &mut Document,
+    i: usize,
+    page: &pdfcraft_model::Page,
+    (w, h): (f64, f64),
+    wm: &Watermark,
+    lines: &[&str],
+    opacity: f64,
+) -> Result<(), EditError> {
+    let widest = lines.iter().map(|l| added::line_width(&wm.item(l, 1.0, 1.0e6), l)).fold(0.0, f64::max);
+    if !(widest.is_finite() && widest > 0.0) {
+        return Err(EditError::Invalid("invalid watermark settings".into()));
+    }
+    let size = if wm.font_size > 0.0 { wm.font_size.min(300.0) } else { ((w * w + h * h).sqrt() * 0.5 / widest).clamp(6.0, 300.0) };
+    // Lines are 1.2 sizes apart (as Add text spaces them); the block's middle sits on the centre.
+    let rows = lines.len().max(1) as f64;
+    let top = (rows - 1.0) * 0.6 * size + 0.6 * size;
+    // Wide enough that no line wraps: the widest line, a little room for rounding, one size.
+    let mut t = wm.item(&lines.join("\n"), size, widest * size * 1.05 + size);
+    t.rect = [t.rect[0], top - rows * 1.2 * size, t.rect[2], top];
+    let (s, c) = wm.rotation.to_radians().sin_cos();
+    let (cx, cy) = (w / 2.0 + wm.offset[0], h / 2.0 + wm.offset[1]);
+    let mut content = begin(MarkKind::Watermark, "Watermark", page.view_matrix(doc)).into_bytes();
+    content.extend(format!("/PCGS{} gs\n{} {} {} {} {} {} cm\n", (opacity * 100.0).round() as i64, n(c), n(s), n(-s), n(c), n(cx), n(cy)).bytes());
+    let (ops, res) = added::text_ops(doc, &t, &page_fonts(doc, page))?;
+    content.extend(ops);
+    content.extend_from_slice(END.as_bytes());
+    add_resources(doc, page, Some(opacity), None)?;
+    let fonts: Vec<(Vec<u8>, Object)> = match res.get(b"Font") {
+        Some(Object::Dict(f)) => f.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        _ => Vec::new(),
+    };
+    add_page_font_objects(doc, i, fonts)?;
+    let page = &page_list(doc)[i];
+    place(doc, page, MarkKind::Watermark, content, wm.behind)
 }
 
 /// Add a solid-colour background behind the content of `pages`.
@@ -1006,8 +1114,8 @@ pub mod indic;
 mod linebreak;
 pub mod text;
 pub use text::{
-    BlockStyle, LineEdit, RangeStyle, TextBlock, TextLine, clear_block, reading_blocks, replace_block, replace_line, rewrite_block, text_blocks,
-    text_lines,
+    BlockStyle, LineEdit, MAX_FORM_DEPTH, MAX_FORM_VISITS, RangeStyle, ReadingBlocks, TextBlock, TextLine, clear_block, reading_blocks,
+    reading_blocks_checked, replace_block, replace_line, rewrite_block, text_blocks, text_lines,
 };
 pub mod added;
 pub use added::{
@@ -1015,5 +1123,7 @@ pub use added::{
     first_undrawable, fitted_text, list_added, scan_markers, text_is_wrapped, update_content,
 };
 
+#[cfg(test)]
+mod marked_isolation_tests;
 #[cfg(test)]
 mod tests;
