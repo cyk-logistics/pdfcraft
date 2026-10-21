@@ -159,6 +159,11 @@ pub struct Watermark {
     pub behind: bool,
     /// Offset of the centre from the page centre, in points (right, up).
     pub offset: [f64; 2],
+    /// The font of a text watermark: a standard family, TH Sarabun PSK or an installed family, as
+    /// Add text offers (Thai edition).
+    pub family: Family,
+    pub bold: bool,
+    pub italic: bool,
 }
 
 impl Watermark {
@@ -168,7 +173,30 @@ impl Watermark {
         match self.source {
             Some(_) => None,
             // Thai edition: Thai is drawn in TH Sarabun PSK.
-            None => self.text.trim().lines().find_map(first_undrawable_char),
+            None if self.plain() => self.text.trim().lines().find_map(first_undrawable_char),
+            // A chosen font draws what its face has; the rest as its standard family, like Add text.
+            None => self.text.trim().lines().find_map(|l| added::first_undrawable(&self.item(l, 12.0, 1.0e6))),
+        }
+    }
+
+    /// Whether the text is drawn in plain Helvetica (`/PCHelv`), as before fonts could be chosen
+    /// (Thai edition).
+    fn plain(&self) -> bool {
+        self.family == Family::Helvetica && !self.bold && !self.italic
+    }
+
+    /// `text` as a centred Add-text item in this font at `size`, `width` wide, its top on the
+    /// x axis (the watermark's own space, before it is turned and moved).
+    fn item(&self, text: &str, size: f64, width: f64) -> AddedText {
+        AddedText {
+            rect: [-width / 2.0, -size, width / 2.0, 0.0],
+            text: text.to_owned(),
+            family: self.family,
+            bold: self.bold,
+            italic: self.italic,
+            size,
+            color: self.color,
+            align: Align::Center,
         }
     }
 }
@@ -185,6 +213,9 @@ impl Default for Watermark {
             rotation: 45.0,
             behind: false,
             offset: [0.0; 2],
+            family: Family::Helvetica,
+            bold: false,
+            italic: false,
         }
     }
 }
@@ -898,6 +929,10 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
             place(doc, page, MarkKind::Watermark, content.into_bytes(), wm.behind)?;
             continue;
         }
+        if !wm.plain() {
+            watermark_in_font(doc, i, &page, (w, h), wm, &lines, opacity)?;
+            continue;
+        }
         let widest = lines.iter().map(|l| page_text_width(l, 1.0)).fold(0.0, f64::max).max(0.01);
         let size = if wm.font_size > 0.0 { wm.font_size } else { ((w * w + h * h).sqrt() * 0.5 / widest).clamp(6.0, 300.0) };
         let (s, c) = wm.rotation.to_radians().sin_cos();
@@ -933,6 +968,47 @@ pub fn add_watermark(doc: &mut Document, pages: &[usize], wm: &Watermark, replac
         place(doc, page, MarkKind::Watermark, content, wm.behind)?;
     }
     Ok(())
+}
+
+/// A text watermark in a chosen font on page `i` (`page`, `w` × `h` displayed), drawn as Add text
+/// draws it (Thai edition): the lines centred on the page centre plus the offset, turned by the
+/// rotation, at the font size or, for 0, about half the page diagonal.
+#[allow(clippy::too_many_arguments)]
+fn watermark_in_font(
+    doc: &mut Document,
+    i: usize,
+    page: &pdfcraft_model::Page,
+    (w, h): (f64, f64),
+    wm: &Watermark,
+    lines: &[&str],
+    opacity: f64,
+) -> Result<(), EditError> {
+    let widest = lines.iter().map(|l| added::line_width(&wm.item(l, 1.0, 1.0e6), l)).fold(0.0, f64::max);
+    if !(widest.is_finite() && widest > 0.0) {
+        return Err(EditError::Invalid("invalid watermark settings".into()));
+    }
+    let size = if wm.font_size > 0.0 { wm.font_size.min(300.0) } else { ((w * w + h * h).sqrt() * 0.5 / widest).clamp(6.0, 300.0) };
+    // Lines are 1.2 sizes apart (as Add text spaces them); the block's middle sits on the centre.
+    let rows = lines.len().max(1) as f64;
+    let top = (rows - 1.0) * 0.6 * size + 0.6 * size;
+    // Wide enough that no line wraps: the widest line, a little room for rounding, one size.
+    let mut t = wm.item(&lines.join("\n"), size, widest * size * 1.05 + size);
+    t.rect = [t.rect[0], top - rows * 1.2 * size, t.rect[2], top];
+    let (s, c) = wm.rotation.to_radians().sin_cos();
+    let (cx, cy) = (w / 2.0 + wm.offset[0], h / 2.0 + wm.offset[1]);
+    let mut content = begin(MarkKind::Watermark, "Watermark", page.view_matrix(doc)).into_bytes();
+    content.extend(format!("/PCGS{} gs\n{} {} {} {} {} {} cm\n", (opacity * 100.0).round() as i64, n(c), n(s), n(-s), n(c), n(cx), n(cy)).bytes());
+    let (ops, res) = added::text_ops(doc, &t, &page_fonts(doc, page))?;
+    content.extend(ops);
+    content.extend_from_slice(END.as_bytes());
+    add_resources(doc, page, Some(opacity), None)?;
+    let fonts: Vec<(Vec<u8>, Object)> = match res.get(b"Font") {
+        Some(Object::Dict(f)) => f.iter().map(|(k, v)| (k.clone(), v.clone())).collect(),
+        _ => Vec::new(),
+    };
+    add_page_font_objects(doc, i, fonts)?;
+    let page = &page_list(doc)[i];
+    place(doc, page, MarkKind::Watermark, content, wm.behind)
 }
 
 /// Add a solid-colour background behind the content of `pages`.

@@ -95,6 +95,37 @@ fn the_edit_panel_removes_a_header_and_the_dialog_chooses_its_font() {
     assert!(marks(&h).is_empty());
 }
 
+/// Thai edition: the Watermark dialog takes a font, as Header and Footer does.
+#[test]
+fn the_watermark_dialog_chooses_its_font() {
+    let mut h = harness();
+    assert!(h.state_mut().execute("edit.watermark"));
+    h.run_steps(3);
+    h.get_by_label("Font:");
+    // Pick Times in the font menu, as a user does: open it, type, Enter takes the first match.
+    h.get_by(|n| n.value().as_deref() == Some("Helvetica")).click();
+    h.run_steps(3);
+    // The menu puts the caret in its search box.
+    h.input_mut().events.push(egui::Event::Text("Times".into()));
+    h.run_steps(2);
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().marks_draft.wm.family, pdfcraft_engine::FontFamily::Times, "the menu sets the watermark's font");
+    h.get_by_label("Bold").click();
+    h.state_mut().marks_draft.wm.text = "DRAFT".into();
+    h.run_steps(2);
+    if let Ok(dir) = std::env::var("PDFCRAFT_SHOT_DIR") {
+        h.render().unwrap().save(std::path::Path::new(&dir).join("watermark-font.png")).unwrap();
+    }
+    h.get_by_label("OK").click();
+    h.run_steps(4);
+    assert_eq!(marks(&h), [MarkKind::Watermark]);
+    let s = h.state();
+    let lines = s.session.get(s.views[0].id).unwrap().text_lines(0);
+    let draft = lines.iter().find(|l| l.text == "DRAFT").expect("the watermark's text is on the page");
+    assert_eq!(draft.font, "PCFTimesBold", "drawn in the chosen font");
+}
+
 #[test]
 fn watermark_and_background_dialogs() {
     let mut h = harness();

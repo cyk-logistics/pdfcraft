@@ -242,6 +242,13 @@ pub(crate) fn body(ui: &mut egui::Ui, app: &mut PdfCraftApp, t: &Tokens, kind: M
             ui.horizontal_top(|ui| {
                 ui.vertical(|ui| {
                     ui.add_enabled_ui(!d.use_file, |ui| {
+                        // The watermark's font, as Header and Footer offers (Thai edition).
+                        ui.horizontal(|ui| {
+                            ui.label(tl!("Font:"));
+                            crate::content_ui::family_menu(ui, &mut d.wm.family);
+                            ui.add(widgets::checkbox(&mut d.wm.bold, tl!("Bold")));
+                            ui.add(widgets::checkbox(&mut d.wm.italic, tl!("Italic")));
+                        });
                         ui.label(tl!("Text"));
                         ui.add(
                             crate::widgets::block(&mut d.wm.text).desired_rows(2).desired_width(320.0).hint_text("CONFIDENTIAL").id_salt("wm-text"),

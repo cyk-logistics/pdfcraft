@@ -338,6 +338,54 @@ fn watermarks_rotate_fade_and_can_go_behind() {
     assert_eq!(s.len(), 2, "no wrapper needed for content behind");
 }
 
+/// Thai edition: a watermark takes the chosen font, drawn as Add text draws it, and still turns,
+/// fades and goes away with Remove.
+#[test]
+fn watermarks_take_the_chosen_font_and_can_be_removed() {
+    let mut doc = fixture();
+    let wm = Watermark { text: "CONFIDENTIAL\nDo not copy".into(), opacity: 0.3, family: Family::Times, bold: true, ..Watermark::default() };
+    add_watermark(&mut doc, &[0], &wm, false).unwrap();
+    let doc2 = reopen(&doc);
+    let mark = streams(&doc2, 0).into_iter().find(|s| s.contains("/PCMark /Watermark")).expect("a watermark stream");
+    assert!(mark.contains("/PCGS30 gs") && mark.contains("0.707 0.707 -0.707 0.707 300 400 cm"), "{mark}");
+    assert!(mark.contains("/PCFTimesBold") && !mark.contains("/PCHelv"), "{mark}");
+    // Each line is drawn whole: the box is wide enough that nothing wraps.
+    assert!(mark.contains("(CONFIDENTIAL) Tj") && mark.contains("(Do not copy) Tj"), "{mark}");
+    let p0 = &pdfcraft_model::pages(&doc2)[0];
+    let res = doc2.resolve(p0.dict.get(b"Resources").unwrap());
+    let fonts = doc2.resolve(res.as_dict().unwrap().get(b"Font").unwrap());
+    let times = doc2.resolve(fonts.as_dict().unwrap().get(b"PCFTimesBold").unwrap());
+    assert_eq!(times.as_dict().unwrap().name(b"BaseFont"), Some(&b"Times-Bold"[..]));
+    assert_eq!(marks_present(&doc), [MarkKind::Watermark]);
+    assert_eq!(remove_marks(&mut doc, &[0], MarkKind::Watermark).unwrap(), 1);
+    assert!(marks_present(&doc).is_empty());
+    // A font's own face is checked like Add text: what neither it nor its standard family draws is refused.
+    let greek = Watermark { text: "Ελλάδα".into(), ..wm.clone() };
+    assert!(greek.first_undrawable().is_some());
+    assert!(add_watermark(&mut doc, &[0], &greek, false).unwrap_err().to_string().contains("U+0395"));
+    // Plain Helvetica keeps the original /PCHelv watermark.
+    add_watermark(&mut doc, &[0], &Watermark { text: "DRAFT".into(), ..Watermark::default() }, false).unwrap();
+    assert!(streams(&doc, 0).iter().any(|s| s.contains("/PCMark /Watermark") && s.contains("/PCHelv")));
+}
+
+/// Thai edition: a Thai watermark in TH Sarabun PSK is drawn from that face (shaped, so the
+/// vowels and tone marks sit right) and can be searched and copied.
+#[test]
+fn a_thai_watermark_in_th_sarabun_is_drawn_from_its_face() {
+    if Family::Sarabun.craft(false, false).is_none() {
+        return;
+    }
+    let mut doc = fixture();
+    let wm = Watermark { text: "ลับเฉพาะ ห้ามเผยแพร่".into(), family: Family::Sarabun, ..Watermark::default() };
+    assert_eq!(wm.first_undrawable(), None);
+    add_watermark(&mut doc, &[0], &wm, false).unwrap();
+    let doc2 = reopen(&doc);
+    let mark = streams(&doc2, 0).into_iter().find(|s| s.contains("/PCMark /Watermark")).expect("a watermark stream");
+    assert!(!mark.contains("/PCHelv"), "{mark}");
+    let text: String = text::text_lines(&doc2, 0).unwrap().into_iter().map(|l| l.text).collect::<Vec<_>>().join(" ");
+    assert!(text.contains("ลับเฉพาะ") && text.contains("ห้ามเผยแพร่"), "{text}");
+}
+
 #[test]
 fn watermark_offset_moves_the_centre_right_and_up() {
     let mut doc = fixture();

@@ -888,13 +888,15 @@ pub fn tools() -> Vec<ToolDef> {
             }),
             &["doc"],
         )),
-        t("doc_watermark", "Add watermark", "Add a watermark to pages: text, or a picture from `file` (an image, or page `file_page` of a PDF) at `scale` of the page (default 0.5); rotated (degrees counter-clockwise, default 45), semi-transparent (opacity 0–1, default 0.5), text fitted to the page unless font_size is given, on top unless behind: true; moved from the page centre by `offset_x` (right) and `offset_y` (up) points (default 0). replace: true swaps out existing ones. Undoable.")
+        t("doc_watermark", "Add watermark", "Add a watermark to pages: text, or a picture from `file` (an image, or page `file_page` of a PDF) at `scale` of the page (default 0.5); rotated (degrees counter-clockwise, default 45), semi-transparent (opacity 0–1, default 0.5), text fitted to the page unless font_size is given, in `font` (bold, italic) as Add text draws it, on top unless behind: true; moved from the page centre by `offset_x` (right) and `offset_y` (up) points (default 0). replace: true swaps out existing ones. Undoable.")
             .cmd("edit.watermark")
             .with(schema(
                 json!({
                     "doc": doc(),
                     "pages": pages("to mark (default: all)"),
                     "text": { "type": "string", "minLength": 1 },
+                    "font": { "type": "string", "description": "helvetica (default), times, courier, sarabun, or an installed font's family name." },
+                    "bold": { "type": "boolean" }, "italic": { "type": "boolean" },
                     "file": { "type": "string" },
                     "file_page": { "type": "integer", "minimum": 1 },
                     "scale": { "type": "number", "exclusiveMinimum": 0, "maximum": 1 },

@@ -2275,6 +2275,23 @@ fn watermarks_move_from_the_page_centre_through_tools() {
     assert!(matches!(a.call("doc_watermark", &json!({ "doc": doc, "text": "X", "offset_x": "left" })), Err(ToolError::InvalidArgs(_))));
 }
 
+/// Thai edition: doc_watermark takes font, bold and italic as doc_header_footer does.
+#[test]
+fn watermarks_take_a_font_through_tools() {
+    let dir = workdir("wm-font");
+    let mut a = auto(&dir);
+    let doc = ok(&mut a, "doc_open", json!({ "path": "a.pdf" }))["doc"].as_u64().unwrap();
+    ok(&mut a, "doc_watermark", json!({ "doc": doc, "pages": [1], "text": "DRAFT", "font": "times", "bold": true }));
+    let lines = ok(&mut a, "text_lines", json!({ "doc": doc, "page": 1 }));
+    let draft = lines["lines"].as_array().unwrap().iter().find(|l| l["text"] == "DRAFT").unwrap_or_else(|| panic!("{lines}"));
+    assert_eq!(draft["font"], "Times-Bold", "{draft}");
+    if pdfcraft_fonts::thai_text::available() {
+        ok(&mut a, "doc_watermark", json!({ "doc": doc, "pages": [2], "text": "ลับเฉพาะ", "font": "sarabun" }));
+        assert!(page_text(&mut a, doc)[1].contains("ลับเฉพาะ"), "{:?}", page_text(&mut a, doc));
+    }
+    assert!(matches!(a.call("doc_watermark", &json!({ "doc": doc, "text": "X", "font": "no such font 123" })), Err(ToolError::InvalidArgs(_))));
+}
+
 #[test]
 fn exporting_images_and_text_through_tools() {
     let dir = workdir("export");

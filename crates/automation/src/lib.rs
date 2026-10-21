@@ -93,6 +93,20 @@ const MAX_DPI: f64 = 600.0;
 /// How far a watermark may be moved from the page centre, in points (a page is at most 14,400).
 const WATERMARK_MAX_OFFSET: f64 = 20_000.0;
 
+/// The `font` of a header and footer or a watermark (Thai edition): a standard family, TH
+/// Sarabun PSK or an installed family.
+fn mark_family(f: &str) -> Result<pdfcraft_engine::FontFamily> {
+    Ok(match f.to_ascii_lowercase().as_str() {
+        "helvetica" => pdfcraft_engine::FontFamily::Helvetica,
+        "times" => pdfcraft_engine::FontFamily::Times,
+        "courier" => pdfcraft_engine::FontFamily::Courier,
+        "sarabun" => pdfcraft_engine::FontFamily::Sarabun,
+        _ => pdfcraft_engine::FontFamily::from_name(f).ok_or_else(|| {
+            ToolError::InvalidArgs(format!("unknown font {f:?} (helvetica, times, courier, sarabun, or an installed font's family name)"))
+        })?,
+    })
+}
+
 /// Bookmarks in one page of the bookmark list, by default and at most.
 const BOOKMARK_PAGE: usize = 100;
 const MAX_BOOKMARK_PAGE: usize = 1000;
@@ -1214,17 +1228,7 @@ impl Automation {
                     hf.start_number = s.clamp(1, u32::MAX as i64) as u32;
                 }
                 if let Some(f) = a.opt_str("font")? {
-                    hf.family = match f.to_ascii_lowercase().as_str() {
-                        "helvetica" => pdfcraft_engine::FontFamily::Helvetica,
-                        "times" => pdfcraft_engine::FontFamily::Times,
-                        "courier" => pdfcraft_engine::FontFamily::Courier,
-                        "sarabun" => pdfcraft_engine::FontFamily::Sarabun,
-                        _ => pdfcraft_engine::FontFamily::from_name(f).ok_or_else(|| {
-                            ToolError::InvalidArgs(format!(
-                                "unknown font {f:?} (helvetica, times, courier, sarabun, or an installed font's family name)"
-                            ))
-                        })?,
-                    };
+                    hf.family = mark_family(f)?;
                 }
                 hf.underline = a.opt_bool("underline")?.unwrap_or(false);
                 hf.bold = a.opt_bool("bold")?.unwrap_or(false);
@@ -1251,6 +1255,10 @@ impl Automation {
                         a.opt_num("offset_x")?.unwrap_or(0.0).clamp(-WATERMARK_MAX_OFFSET, WATERMARK_MAX_OFFSET),
                         a.opt_num("offset_y")?.unwrap_or(0.0).clamp(-WATERMARK_MAX_OFFSET, WATERMARK_MAX_OFFSET),
                     ],
+                    // The text's font (Thai edition), as doc_header_footer takes it.
+                    family: a.opt_str("font")?.map(mark_family).transpose()?.unwrap_or(d.family),
+                    bold: a.opt_bool("bold")?.unwrap_or(false),
+                    italic: a.opt_bool("italic")?.unwrap_or(false),
                 };
                 Edit::AddWatermark { pages, settings: wm, replace, file }
             }
