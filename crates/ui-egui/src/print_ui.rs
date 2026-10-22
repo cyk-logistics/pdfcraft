@@ -500,6 +500,28 @@ impl PdfCraftApp {
             }
         };
         let name = doc.name.clone();
+        // Windows printer (Thai edition): the vector print-ready PDF decides; a job printed as
+        // pictures (Print as image, or Type 3 text, which Windows' PDF print path crashes on) is
+        // drawn from those vector sheets at its resolution and spooled as pictures, which
+        // Windows.Data.Pdf would have resampled to 96 dpi.
+        #[cfg(target_os = "windows")]
+        if let Some(printer) = self.print_draft.printer.clone() {
+            let vector = print::Settings { raster: None, ..settings.clone() };
+            let bytes = match self.session.print_pdf(id, &vector) {
+                Ok(b) => b,
+                Err(e) => {
+                    self.notify_error(e);
+                    return false;
+                }
+            };
+            let pictures = print::picture_raster(&settings, &bytes);
+            if pictures.is_some_and(|(_, type3)| type3) {
+                self.notify(
+                    tl!("This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).").to_string(),
+                );
+            }
+            return self.send_to_printer(printer, bytes, self.print_draft.job(&name), pictures.map(|(r, _)| r));
+        }
         let bytes = match self.session.print_pdf(id, &settings) {
             Ok(b) => b,
             Err(e) => {
@@ -519,7 +541,7 @@ impl PdfCraftApp {
                     }
                 }
             }
-            Some(printer) => self.send_to_printer(printer, bytes, self.print_draft.job(&name)),
+            Some(printer) => self.send_to_printer(printer, bytes, self.print_draft.job(&name), None),
             None => self.save_print_pdf(&name, bytes),
         }
     }
@@ -528,8 +550,9 @@ impl PdfCraftApp {
     /// resolution first, which can take minutes for a long document. The dialog closes at once,
     /// the progress card counts the sheets as they reach the spooler, and the spooler's answer
     /// arrives as a notice.
+    /// `pictures`: the job goes to the spooler as pictures at that resolution (Thai edition).
     #[cfg(not(target_arch = "wasm32"))]
-    fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job) -> bool {
+    fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job, pictures: Option<print::Raster>) -> bool {
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = self.ctx.clone();
         std::thread::spawn(move || {
@@ -539,10 +562,19 @@ impl PdfCraftApp {
                 }
             };
             // The receiver may be gone (the app quit): nothing to report to then.
-            let result = spool::submit_with_progress(&bytes, &job, &mut |sent, sheets| {
+            let mut report = |sent, sheets| {
                 let _ = tx.send(JobNews::Sent(sent, sheets));
                 repaint();
-            });
+            };
+            let result = match pictures {
+                Some(r) => spool::submit_pictures_with_progress(
+                    &bytes,
+                    &job,
+                    &move |pdf: &[u8]| pdfcraft_engine::print_raster::sheets_as_tiff(pdf, r.dpi, r.grayscale),
+                    &mut report,
+                ),
+                None => spool::submit_with_progress(&bytes, &job, &mut report),
+            };
             let _ = tx.send(JobNews::Done(result.map_err(|e| e.to_string())));
             repaint();
         });
@@ -553,7 +585,7 @@ impl PdfCraftApp {
 
     /// A browser has no spooler: `submit` answers at once.
     #[cfg(target_arch = "wasm32")]
-    fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job) -> bool {
+    fn send_to_printer(&mut self, printer: String, bytes: Vec<u8>, job: spool::Job, _pictures: Option<print::Raster>) -> bool {
         let result = spool::submit(&bytes, &job).map_err(|e| e.to_string());
         let ok = result.is_ok();
         self.report_print_job(&printer, result);

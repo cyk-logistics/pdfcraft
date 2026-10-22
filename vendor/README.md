@@ -51,3 +51,16 @@ black-point normalization is unchanged. `lab_bradford_tests` checks independent
 D50/equal-energy neutral and chromatic oracles, D65 identity, and direct/Indexed
 consistency (including an asymmetric chromatic Range), and zero/overflowing
 cone-response fallback.
+
+## craft-print (Thai edition)
+
+`vendor/craft-print` is `crates/print` of storytold/craft-libs at rev `666c358065261a2816b376fa3bb10538dbf53040`
+(MIT OR Apache-2.0), patched in through `[patch."https://github.com/storytold/craft-libs"]`. Its
+manifest spells out the workspace values it inherited. PdfCraft patch: `submit_pictures_with_progress`
+(lib.rs, windows.rs) spools a job printed as pictures through winprint's `ImagePrinter` as a
+multi-page TIFF the caller draws from the final print-ready PDF, instead of through
+`Windows.Data.Pdf`, which resamples pictures to 96 dpi (storytold/pdfcraft#2676) and whose Direct2D
+print path crashes on Type 3 text. Covered by `pdfcraft-engine`
+`print_ready_sheets_become_a_tiff_at_their_resolution` and `pdfcraft-print`
+`windows_jobs_print_as_pictures_for_print_as_image_or_type3_text`; the spooling itself was checked
+by hand against the Adobe PDF printer.

@@ -59,3 +59,49 @@ fn over_white(rgba: &mut [u8], grayscale: bool) {
         px[3] = 255;
     }
 }
+
+/// Most sheets [`sheets_as_tiff`] draws: a print job longer than this is refused rather than
+/// held as pictures in memory.
+const MAX_PICTURE_SHEETS: usize = 2_000;
+
+/// The print-ready `pdf`'s sheets as a multi-page TIFF (RGB, LZW), one page per sheet at `dpi`
+/// (lowered for a sheet too large for the renderer), each page's resolution recorded so it keeps
+/// the sheet's size, in grey when asked. Thai edition: what the Windows spooler gets for a job
+/// printed as pictures (`craft_print::submit_pictures_with_progress`), so the pictures arrive at
+/// their full resolution instead of `Windows.Data.Pdf`'s 96 dpi.
+pub fn sheets_as_tiff(pdf: &[u8], dpi: f64, grayscale: bool) -> Result<Vec<u8>, String> {
+    use tiff::encoder::{Compression, Rational, TiffEncoder, colortype::RGB8};
+    use tiff::tags::{ResolutionUnit, Tag};
+    let err = |e: tiff::TiffError| e.to_string();
+    let bytes = std::sync::Arc::new(pdf.to_vec());
+    let info = pdfcraft_render::inspect(bytes.clone(), None).map_err(|e| e.to_string())?;
+    if info.pages.is_empty() || info.pages.len() > MAX_PICTURE_SHEETS {
+        return Err(format!("a print job of {} sheets can't be drawn as pictures", info.pages.len()));
+    }
+    let dpi = if dpi.is_finite() { dpi.clamp(72.0, 600.0) } else { 300.0 };
+    let mut renderer = PageRenderer::new(bytes, pdfcraft_render::RenderConfig::default());
+    let mut out = std::io::Cursor::new(Vec::new());
+    let mut tiff = TiffEncoder::new(&mut out).map_err(err)?.with_compression(Compression::Lzw);
+    for (page, p) in info.pages.iter().enumerate() {
+        let scale = pdfcraft_render::effective_scale(p.width, p.height, (dpi / 72.0) as f32);
+        let r = renderer.render(RenderRequest { page, scale, tag: PRINT_TAG, ..Default::default() });
+        if let Some(e) = r.error {
+            return Err(format!("sheet {}: {e}", page + 1));
+        }
+        let mut rgba = r.rgba.to_vec();
+        over_white(&mut rgba, grayscale);
+        let rgb: Vec<u8> = rgba.as_chunks::<4>().0.iter().flat_map(|px| [px[0], px[1], px[2]]).collect();
+        // The resolution the sheet was drawn at, so the picture keeps the sheet's width.
+        let page_dpi = f64::from(r.width) * 72.0 / f64::from(p.width.max(1.0));
+        let resolution = Rational { n: (page_dpi * 100.0).round() as u32, d: 100 };
+        let mut image = tiff.new_image::<RGB8>(r.width, r.height).map_err(err)?;
+        let tags = image.encoder();
+        tags.write_tag(Tag::ResolutionUnit, ResolutionUnit::Inch).map_err(err)?;
+        tags.write_tag(Tag::XResolution, resolution.clone()).map_err(err)?;
+        tags.write_tag(Tag::YResolution, resolution).map_err(err)?;
+        image.write_data(&rgb).map_err(err)?;
+    }
+    // The encoder borrows `out`; it writes each page as it is added, so nothing is pending here.
+    let _ = tiff;
+    Ok(out.into_inner())
+}

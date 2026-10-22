@@ -892,6 +892,54 @@ pub fn impose(src: &Document, settings: &Settings) -> Result<Vec<u8>, PrintError
     Ok(write_full(&doc, &SaveOptions::default())?)
 }
 
+/// Most objects [`uses_type3_fonts`] looks at; a print-ready PDF has far fewer.
+const TYPE3_SCAN_LIMIT: usize = 1_000_000;
+
+/// Whether the print-ready `pdf` uses a Type 3 font anywhere: page text, comment and field
+/// appearances, forms. Thai edition: Windows' print path (`Windows.Data.Pdf` drawing into a
+/// Direct2D print control, `d2d1.dll`) crashes or hangs on Type 3 text shown in more than one
+/// run, which takes the whole app down, so such jobs are printed as pictures instead. A file that
+/// can't be read counts as having none (the spooler then reports its own error).
+pub fn uses_type3_fonts(pdf: &[u8]) -> bool {
+    let Ok(doc) = Document::open(std::sync::Arc::new(pdf.to_vec())) else { return false };
+    doc.scan_objects().take(TYPE3_SCAN_LIMIT).any(|(_, o)| has_type3_font(&o, 0))
+}
+
+/// How deep [`has_type3_font`] looks inside one object's dictionaries and arrays.
+const TYPE3_NESTING_LIMIT: usize = 32;
+
+/// Whether `o` is a Type 3 font dictionary or holds one directly: a font can be written inline in
+/// a page's or form's `/Resources` instead of as an object of its own (as PdfCraft's shaped text
+/// fonts are). References are not followed: the objects they name are scanned on their own.
+fn has_type3_font(o: &Object, depth: usize) -> bool {
+    if depth > TYPE3_NESTING_LIMIT {
+        return false;
+    }
+    if let Some(d) = o.as_dict() {
+        if d.name(b"Subtype") == Some(b"Type3".as_slice()) && d.name(b"Type").is_none_or(|t| t == b"Font") {
+            return true;
+        }
+        return d.iter().any(|(_, v)| has_type3_font(v, depth + 1));
+    }
+    o.as_array().is_some_and(|a| a.iter().any(|v| has_type3_font(v, depth + 1)))
+}
+
+/// The resolution a job falls back to when it is printed as pictures for Windows (Thai edition):
+/// the highest Print as image offers, so text stays sharp.
+pub const TYPE3_FALLBACK_DPI: f64 = 600.0;
+
+/// How a job going to a Windows printer is printed as pictures (Thai edition): the job's own Print
+/// as image setting, else 600 dpi when its print-ready (vector) `pdf` uses Type 3 fonts, which
+/// Windows' PDF print path crashes on; `None` to print the PDF as it is. The flag says the Type 3
+/// rule chose it. The pictures are drawn from the vector sheets
+/// (`pdfcraft_engine::print_raster::sheets_as_tiff`), so only one resampling happens.
+pub fn picture_raster(settings: &Settings, pdf: &[u8]) -> Option<(Raster, bool)> {
+    match &settings.raster {
+        Some(r) => Some((*r, false)),
+        None => uses_type3_fonts(pdf).then_some((Raster { dpi: TYPE3_FALLBACK_DPI, grayscale: false }, true)),
+    }
+}
+
 /// Which source pages land on each sheet (for previews and the sheet count).
 pub fn sheet_pages(sheets: &[Sheet]) -> Vec<Vec<usize>> {
     sheets.iter().map(|s| s.placed.iter().map(|p| p.page).collect()).collect()

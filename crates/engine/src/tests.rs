@@ -6106,3 +6106,35 @@ fn undo_never_makes_an_unsaved_document_clean() {
     s.undo(new).unwrap();
     assert!(!s.get(new).unwrap().dirty, "once saved, undo back to the saved state is clean");
 }
+
+/// Thai edition: a job printed as pictures reaches the Windows spooler as a TIFF of its sheets, one
+/// page per sheet at the asked resolution, each recording it so the sheet keeps its size (the
+/// pictures were resampled to 96 dpi when they went through Windows.Data.Pdf).
+#[test]
+fn print_ready_sheets_become_a_tiff_at_their_resolution() {
+    use tiff::decoder::Decoder;
+    let (s, id) = session_with(2);
+    let pdf = s.print_pdf(id, &print::Settings { pages: vec![0, 1], ..Default::default() }).unwrap();
+    let sheet = pdfcraft_render::inspect(Arc::new(pdf.clone()), None).unwrap().pages[0].clone();
+    let tiff = crate::print_raster::sheets_as_tiff(&pdf, 300.0, false).unwrap();
+    assert_eq!(tiff_resolution(&tiff), (2, 300.0, 300.0));
+    let mut d = Decoder::new(std::io::Cursor::new(&tiff)).unwrap();
+    let mut pages = 0;
+    loop {
+        let (w, h) = d.dimensions().unwrap();
+        assert!((f64::from(w) - f64::from(sheet.width) * 300.0 / 72.0).abs() <= 1.0, "{w} px wide for {} pt", sheet.width);
+        assert!((f64::from(h) - f64::from(sheet.height) * 300.0 / 72.0).abs() <= 1.0, "{h} px tall for {} pt", sheet.height);
+        pages += 1;
+        if !d.more_images() {
+            break;
+        }
+        d.next_image().unwrap();
+    }
+    assert_eq!(pages, 2, "one picture per sheet");
+    // Grey asks for grey pixels; nothing that isn't a PDF is drawn.
+    let grey = crate::print_raster::sheets_as_tiff(&pdf, 72.0, true).unwrap();
+    let mut d = Decoder::new(std::io::Cursor::new(&grey)).unwrap();
+    let tiff::decoder::DecodingResult::U8(px) = d.read_image().unwrap() else { panic!("8-bit pixels") };
+    assert!(px.chunks(3).all(|p| p[0] == p[1] && p[1] == p[2]), "every pixel grey");
+    assert!(crate::print_raster::sheets_as_tiff(b"not a pdf", 300.0, false).is_err());
+}

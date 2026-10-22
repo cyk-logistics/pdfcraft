@@ -2729,3 +2729,4 @@ certificate	Version	الإصدار
 	Make properties default	جعل الخصائص افتراضية
 	Pages selected	الصفحات المحددة
 	Page properties	خصائص الصفحة
+	This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).	يحتوي هذا الملف على نص بخط Type 3 لا تستطيع طباعة Windows التعامل معه، لذا تتم طباعته كصورة (600 نقطة لكل بوصة).

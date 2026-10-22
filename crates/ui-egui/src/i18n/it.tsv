@@ -2664,3 +2664,4 @@ certificate	Key usage	Utilizzo chiave
 certificate	Self-signed	Autofirmato
 certificate	SHA-1 digest	Impronta SHA-1
 certificate	SHA-256 digest	Impronta SHA-256
+	This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).	Questo file contiene testo in un font Type 3 che la stampa di Windows non riesce a gestire, quindi viene stampato come immagine (600 dpi).
