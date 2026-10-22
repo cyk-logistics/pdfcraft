@@ -426,3 +426,25 @@ fn an_empty_printer_list_says_none_were_found() {
     h.get_by_label_contains("No printers were found");
     assert!(!h.get_by_role_and_label(Role::Button, "Save as PDF").accesskit_node().is_disabled());
 }
+
+/// Thai edition: Enter in the dialog is its default button (here Save as PDF, with no printer).
+#[test]
+fn enter_runs_the_default_button() {
+    use std::sync::Arc;
+    let mut h = harness();
+    h.state_mut().printer_source = Some(Arc::new(Vec::new));
+    assert!(h.state_mut().execute("print.dialog"));
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(10);
+    while h.state().print_draft.printers_loading && std::time::Instant::now() < deadline {
+        h.run_steps(1);
+        std::thread::sleep(std::time::Duration::from_millis(5));
+    }
+    h.run_steps(2);
+    let out = std::env::temp_dir().join(format!("pdfcraft-print-enter-{}.pdf", std::process::id()));
+    h.state_mut().save_override = Some(out.to_string_lossy().into_owned());
+    h.key_press(egui::Key::Enter);
+    h.run_steps(3);
+    assert_eq!(h.state().dialog, None, "Enter saved and closed the dialog");
+    assert!(std::fs::read(&out).is_ok_and(|b| b.starts_with(b"%PDF")), "saved");
+    let _ = std::fs::remove_file(out);
+}

@@ -147,6 +147,7 @@
 	Drawing	繪圖
 	Review	審閱
 	Recognize text	辨識文字
+	Delete text	刪除文字
 	Recognize Text	辨識文字
 	Password protection will be applied when you save	儲存時將套用密碼保護
 	Saved the print-ready PDF to {path}	列印就緒的 PDF 已儲存到{path}

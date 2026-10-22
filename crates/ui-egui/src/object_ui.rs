@@ -521,17 +521,35 @@ pub(crate) fn delete_keys(ctx: &egui::Context, view: &mut DocView) {
         return;
     }
     let Some(page) = view.objects.page else { return };
-    let [one] = view.objects.selected.as_slice() else { return };
-    if one.target.kind != ObjectKind::Text {
+    if view.objects.selected.is_empty() {
         return;
     }
-    let block = one.target.index;
     use egui::{Key, Modifiers};
     if !ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace)) {
         return;
     }
+    let mut edits = delete_edits(page, &view.objects.selected);
     view.objects.clear();
-    view.pending_edit = Some(Edit::EditTextBlock { page, block, text: String::new(), style: Default::default() });
+    view.pending_edit = match edits.len() {
+        1 => edits.pop(),
+        _ => Some(Edit::Batch { label: "Delete text".into(), edits }),
+    };
+}
+
+/// The edits that delete `selected` on `page` (Thai edition), in an order where each index still
+/// means what it did when selected: paragraphs, then images, then added items, each kind last
+/// first, so a deletion never shifts an index still to come.
+fn delete_edits(page: usize, selected: &[EditableObject]) -> Vec<Edit> {
+    let indexes = |kind: ObjectKind| {
+        let mut v: Vec<usize> = selected.iter().filter(|o| o.target.kind == kind).map(|o| o.target.index).collect();
+        v.sort_unstable_by(|a, b| b.cmp(a));
+        v.dedup();
+        v
+    };
+    let text = indexes(ObjectKind::Text).into_iter().map(|block| Edit::EditTextBlock { page, block, text: String::new(), style: Default::default() });
+    let images = indexes(ObjectKind::Image).into_iter().map(|index| Edit::EditPageImage { page, index, change: pdfcraft_engine::ImageEdit::Delete });
+    let added = indexes(ObjectKind::Added).into_iter().map(|index| Edit::DeleteContent { page, index });
+    text.chain(images).chain(added).collect()
 }
 
 pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, selection: &ObjectSelection) {

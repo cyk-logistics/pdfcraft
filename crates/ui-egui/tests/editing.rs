@@ -3108,6 +3108,164 @@ fn delete_removes_a_selected_paragraph_and_undo_brings_it_back() {
     assert_eq!(texts(&h), ["Page 1"], "the page's paragraph is untouched while it is being typed in");
 }
 
+/// Three paragraphs on a 200×300 page, all in view: "Alpha" at y 230, "Bravo" at 190 and "Charlie" at 150.
+fn three_paragraphs() -> Vec<u8> {
+    let body = "BT /F1 12 Tf 20 230 Td (Alpha) Tj ET BT /F1 12 Tf 20 190 Td (Bravo) Tj ET BT /F1 12 Tf 20 150 Td (Charlie) Tj ET";
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [4 0 R] /Count 1 /MediaBox [0 0 200 300] >>".to_string(),
+        "<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Contents 5 0 R /Resources << /Font << /F1 3 0 R >> >> >>".to_string(),
+        format!(
+            "<< /Length {} >>
+stream
+{body}
+endstream",
+            body.len()
+        ),
+    ];
+    let mut out = b"%PDF-1.7
+"
+    .to_vec();
+    let mut offsets = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offsets.push(out.len());
+        out.extend_from_slice(
+            format!(
+                "{} 0 obj
+{o}
+endobj
+",
+                i + 1
+            )
+            .as_bytes(),
+        );
+    }
+    let xref = out.len();
+    out.extend_from_slice(
+        format!(
+            "xref
+0 {}
+0000000000 65535 f 
+",
+            objs.len() + 1
+        )
+        .as_bytes(),
+    );
+    for o in offsets {
+        out.extend_from_slice(
+            format!(
+                "{o:010} 00000 n 
+"
+            )
+            .as_bytes(),
+        );
+    }
+    out.extend_from_slice(
+        format!(
+            "trailer
+<< /Size {} /Root 1 0 R >>
+startxref
+{xref}
+%%EOF
+",
+            objs.len() + 1
+        )
+        .as_bytes(),
+    );
+    out
+}
+
+/// Thai edition: Shift-click picks several paragraphs; Delete removes them all as one undo step
+/// and leaves the others.
+#[test]
+fn delete_removes_every_selected_paragraph_in_one_undo_step() {
+    let mut h = harness(1, |app| {
+        app.open_bytes("three.pdf", None, three_paragraphs()).expect("opens");
+    });
+    let texts = |h: &Harness<'static, PdfCraftApp>| {
+        let app = h.state();
+        let view = app.views.last().unwrap();
+        app.session.get(view.id).unwrap().text_blocks(0).into_iter().map(|b| b.text).collect::<Vec<_>>()
+    };
+    assert_eq!(texts(&h), ["Alpha", "Bravo", "Charlie"]);
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views.last().unwrap().page_screen_rect(0).expect("on screen");
+    let at = |y: f32| egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - y - 4.0) / 300.0 * r.height());
+    let click = |h: &mut Harness<'static, PdfCraftApp>, pos: egui::Pos2, modifiers: Modifiers| {
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers });
+            h.run_steps(1);
+        }
+        h.run_steps(2);
+    };
+    click(&mut h, at(230.0), Modifiers::NONE);
+    click(&mut h, at(150.0), Modifiers::SHIFT);
+    h.get_by_label("2 objects selected");
+    h.key_press(Key::Delete);
+    h.run_steps(4);
+    assert_eq!(texts(&h), ["Bravo"]);
+    assert!(h.state_mut().execute("edit.undo"));
+    h.run_steps(3);
+    assert_eq!(texts(&h), ["Alpha", "Bravo", "Charlie"], "one undo step brings both back");
+}
+
+/// Thai edition: Delete takes a mixed selection too, a paragraph of the page's own text and a
+/// text box added to it, as one undo step; the added list follows.
+#[test]
+fn delete_removes_a_mixed_selection_in_one_undo_step() {
+    let mut h = harness(1, |app| {
+        app.open_bytes("three.pdf", None, three_paragraphs()).expect("opens");
+        let id = app.views.last().unwrap().id;
+        let text = pdfcraft_engine::AddedText { text: "Added".into(), rect: [100.0, 250.0, 190.0, 275.0], size: 12.0, ..Default::default() };
+        app.session.apply(id, pdfcraft_engine::Edit::AddText { page: 0, text }).expect("adds");
+    });
+    let counts = |h: &Harness<'static, PdfCraftApp>| {
+        let app = h.state();
+        let doc = app.session.get(app.views.last().unwrap().id).unwrap();
+        // The page's text includes the added box's.
+        (doc.text_blocks(0).len(), doc.added().len())
+    };
+    assert_eq!(counts(&h), (4, 1));
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views.last().unwrap().page_screen_rect(0).expect("on screen");
+    let at = |x: f32, y: f32| egui::pos2(r.left() + x / 200.0 * r.width(), r.top() + y / 300.0 * r.height());
+    let click = |h: &mut Harness<'static, PdfCraftApp>, pos: egui::Pos2, modifiers: Modifiers| {
+        h.event(egui::Event::PointerMoved(pos));
+        h.run_steps(1);
+        for pressed in [true, false] {
+            h.event(egui::Event::PointerButton { pos, button: egui::PointerButton::Primary, pressed, modifiers });
+            h.run_steps(1);
+        }
+        h.run_steps(2);
+    };
+    // "Alpha" (its baseline 230 up the page) and the added box above it, both from the top.
+    click(&mut h, at(40.0, 66.0), Modifiers::NONE);
+    click(&mut h, at(115.0, 300.0 - 262.0), Modifiers::SHIFT);
+    h.get_by_label("2 objects selected");
+    h.key_press(Key::Delete);
+    h.run_steps(4);
+    assert_eq!(counts(&h), (2, 0), "the paragraph and the added box are gone");
+    assert!(h.state_mut().execute("edit.undo"));
+    h.run_steps(3);
+    assert_eq!(counts(&h), (4, 1), "one undo step brings both back");
+}
+
+/// Ctrl+E opens Edit text & images, and its entry in Edit a PDF says so (Thai edition).
+#[test]
+fn ctrl_e_opens_edit_text_and_its_entry_shows_the_shortcut() {
+    let mut h = harness(1, |_| {});
+    h.key_press_modifiers(Modifiers::COMMAND, Key::E);
+    h.run_steps(3);
+    assert_eq!(h.state().quick_tool, pdfcraft_ui_egui::QuickTool::EditText);
+    let painted = h.output().shapes.iter().any(|s| matches!(&s.shape, egui::Shape::Text(t) if t.galley.text() == "Ctrl+E"));
+    assert!(painted, "the Edit a PDF entry writes its shortcut");
+}
+
 /// Two clicks in a row at `at`: in Edit text, one click selects a paragraph and a double click
 /// opens it for typing.
 #[test]

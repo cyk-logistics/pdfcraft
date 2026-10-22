@@ -2011,7 +2011,8 @@ pub const EDIT_LABELS: &[&str] = &[
 /// The names of the batches built below L7, which an interface shows in the same places as
 /// [`EDIT_LABELS`] and so translates the same way. A batch built in the interface itself arrives
 /// already worded in the interface's language.
-pub const BATCH_LABELS: &[&str] = &["Set document title", "Mark differences", "Detect form fields", "Run JavaScript", "Recognize text"];
+pub const BATCH_LABELS: &[&str] =
+    &["Set document title", "Mark differences", "Detect form fields", "Run JavaScript", "Recognize text", "Delete text"];
 
 impl Edit {
     /// Label for the Edit menu and history ("Undo Rotate pages").
@@ -2919,6 +2920,26 @@ fn renderer_password(bytes: &[u8]) -> String {
 /// The last-resort guard (AGENTS.md §4): run `f`, turning a panic that escapes it into an error
 /// message, so one bad file or edit can't take the app and its other documents down. It is a
 /// safety net for bugs, not a substitute for returning errors.
+/// Rewriting an OCR word (invisible text over a scan) also hides the scanned word: cover it in
+/// the paper's colour and draw the new text in the ink's. Other edits pass through.
+fn cover_scanned_word(edit: Edit, info: &DocInfo, editor: &Editor) -> Edit {
+    match edit {
+        Edit::EditTextBlock { page, block, text, mut style } => {
+            // Only invisible text is sampled; the blocks are usually cached from opening it.
+            if style.cover.is_none()
+                && let Some(info) = info.pages.get(page)
+                && let Some(b) = editor.text_blocks(page).ok().and_then(|b| b.get(block).filter(|b| b.invisible).cloned())
+                && let Some((paper, ink)) = guard(|| scan_colours::sample(&editor.cos, info, page, &b)).ok().flatten()
+            {
+                style.cover = Some(paper);
+                style.color = style.color.or(Some(ink));
+            }
+            Edit::EditTextBlock { page, block, text, style }
+        }
+        other => other,
+    }
+}
+
 pub fn guard<T>(f: impl FnOnce() -> T) -> Result<T, String> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).map_err(|p| {
         p.downcast_ref::<&str>().map(|s| (*s).to_string()).or_else(|| p.downcast_ref::<String>().cloned()).unwrap_or_else(|| "unknown error".into())
@@ -3783,22 +3804,12 @@ impl Session {
         if let Some(p) = editor.cos.permissions() {
             check_permission(&edit, &p)?;
         }
-        // Rewriting an OCR word (invisible text over a scan) also hides the scanned word: cover it
-        // in the paper's colour and draw the new text in the ink's.
         let edit = match edit {
-            Edit::EditTextBlock { page, block, text, mut style } => {
-                // Only invisible text is sampled; the blocks are usually cached from opening it.
-                if style.cover.is_none()
-                    && let Some(info) = doc.info.pages.get(page)
-                    && let Some(b) = editor.text_blocks(page).ok().and_then(|b| b.get(block).filter(|b| b.invisible).cloned())
-                    && let Some((paper, ink)) = guard(|| scan_colours::sample(&editor.cos, info, page, &b)).ok().flatten()
-                {
-                    style.cover = Some(paper);
-                    style.color = style.color.or(Some(ink));
-                }
-                Edit::EditTextBlock { page, block, text, style }
+            // Thai edition: the paragraphs of a batch (several deleted at once) are covered too.
+            Edit::Batch { label, edits } => {
+                Edit::Batch { label, edits: edits.into_iter().map(|e| cover_scanned_word(e, &doc.info, editor)).collect() }
             }
-            other => other,
+            other => cover_scanned_word(other, &doc.info, editor),
         };
         // Nothing to bake: leave undo history and the dirty flag alone.
         if matches!(&edit, Edit::FlattenFillSign) && !pdfcraft_annot::has_visible_fill_sign(&editor.cos) {
@@ -4097,6 +4108,10 @@ impl Session {
     /// Which derived lists a content-only edit can change: added content (`None`, from
     /// undo/redo, re-reads both: always correct, rarely paid).
     fn content_refresh_lists(edit: Option<&Edit>) -> (bool, bool) {
+        // A content-only batch (Thai edition: Delete on a mixed selection) changes what its edits do.
+        if let Some(Edit::Batch { edits, .. }) = edit {
+            return edits.iter().map(|e| Self::content_refresh_lists(Some(e))).fold((false, false), |a, b| (a.0 || b.0, a.1 || b.1));
+        }
         let touches_added = edit.is_none_or(|e| {
             matches!(
                 e,

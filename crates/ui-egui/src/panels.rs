@@ -234,10 +234,26 @@ fn tool_detail(app: &mut PdfCraftApp, ui: &mut egui::Ui, t: &Tokens, g: &'static
                 let chip_label = tl!(chip).to_string();
                 let w = crate::widgets::text_width(ui, &chip_label, &font);
                 let r = Rect::from_center_size(body.right_center() - vec2(w / 2.0 + 10.0, 0.0), vec2(w + 10.0, 16.0));
-                row_label(ui, tl!(item.label), theme::regular(13.0), fg, body.left_center() + vec2(34.0, 0.0), r.left() - body.left() - 42.0);
+                // Thai edition: the entry's keyboard shortcut, written before the chip (where a
+                // menu entry draws its caret instead).
+                let keys = pdfcraft_engine::commands::command(item.command)
+                    .filter(|_| item.actions.is_empty())
+                    .and_then(|spec| spec.shortcut)
+                    .map(|s| crate::commands::shortcut_label(ui.ctx(), s));
+                let mut label_right = r.left();
+                if let Some(keys) = &keys {
+                    let key_font = theme::regular(11.0);
+                    let kw = crate::widgets::text_width(ui, keys, &key_font);
+                    ui.painter().text(r.left_center() - vec2(6.0, 0.0), Align2::RIGHT_CENTER, keys, key_font, t.text_muted);
+                    label_right -= kw + 6.0;
+                }
+                row_label(ui, tl!(item.label), theme::regular(13.0), fg, body.left_center() + vec2(34.0, 0.0), label_right - body.left() - 42.0);
                 ui.painter().rect_filled(r, CornerRadius::same(4), fill);
                 ui.painter().text(r.center(), Align2::CENTER_CENTER, chip_label, font, cfg);
-                let resp = theme::hand(resp).tip(format!("{} — {}", tl!(item.label), item.command));
+                let resp = match &keys {
+                    Some(keys) => theme::hand(resp).tip(format!("{} ({keys}) — {}", tl!(item.label), item.command)),
+                    None => theme::hand(resp).tip(format!("{} — {}", tl!(item.label), item.command)),
+                };
                 if item.actions.is_empty() {
                     if resp.clicked() {
                         run = Some(item.command);

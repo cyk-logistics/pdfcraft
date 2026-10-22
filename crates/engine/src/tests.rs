@@ -6138,3 +6138,33 @@ fn print_ready_sheets_become_a_tiff_at_their_resolution() {
     assert!(px.chunks(3).all(|p| p[0] == p[1] && p[1] == p[2]), "every pixel grey");
     assert!(crate::print_raster::sheets_as_tiff(b"not a pdf", 300.0, false).is_err());
 }
+
+/// Thai edition: Delete with several original paragraphs selected empties them, last first, as
+/// one batch: the paragraph between them stays, and one undo brings both back.
+#[test]
+fn deleting_several_paragraphs_is_one_undoable_step() {
+    let body = "BT /F1 14 Tf 72 250 Td (Alpha) Tj ET BT /F1 14 Tf 72 150 Td (Bravo) Tj ET BT /F1 14 Tf 72 50 Td (Charlie) Tj ET";
+    let mut session = Session::new();
+    let id = session.open("three.pdf", None, Arc::new(one_line_page("/Font << /F1 4 0 R >>", body)), None).unwrap();
+    let texts = |s: &Session| -> Vec<String> {
+        s.get(id).unwrap().editor.as_ref().unwrap().text_blocks(0).unwrap().iter().map(|b| b.editor_text.clone()).collect()
+    };
+    assert_eq!(texts(&session), ["Alpha", "Bravo", "Charlie"]);
+    let delete = |block| Edit::EditTextBlock { page: 0, block, text: String::new(), style: pdfcraft_edit::BlockStyle::default() };
+    session.apply(id, Edit::Batch { label: "Delete text".into(), edits: vec![delete(2), delete(0)] }).unwrap();
+    assert_eq!(texts(&session), ["Bravo"]);
+    assert!(BATCH_LABELS.contains(&"Delete text"), "the history label is translated");
+    session.undo(id).unwrap();
+    assert_eq!(texts(&session), ["Alpha", "Bravo", "Charlie"]);
+}
+
+/// Thai edition: a batch re-reads the lists its own edits change, so deleting added content
+/// together with a paragraph doesn't leave the deleted item listed.
+#[test]
+fn a_batch_refreshes_what_its_edits_touch() {
+    let delete_added = Edit::DeleteContent { page: 0, index: 0 };
+    let paragraph = Edit::EditTextBlock { page: 0, block: 0, text: String::new(), style: pdfcraft_edit::BlockStyle::default() };
+    let batch = |edits| Edit::Batch { label: "Delete text".into(), edits };
+    assert_eq!(Session::content_refresh_lists(Some(&batch(vec![paragraph.clone(), delete_added]))), (true, false));
+    assert_eq!(Session::content_refresh_lists(Some(&batch(vec![paragraph]))), (false, false));
+}
