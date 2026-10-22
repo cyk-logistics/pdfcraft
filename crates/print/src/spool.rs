@@ -65,6 +65,23 @@ pub fn submit_with_progress(pdf: &[u8], job: &Job, progress: &mut dyn FnMut(usiz
     craft_print::submit_with_progress(pdf, job, progress).map_err(|e| crate::PrintError::Spool(e.to_string()))
 }
 
+/// Draws the print-ready PDF's sheets as a multi-page TIFF (Thai edition, see
+/// [`submit_pictures_with_progress`]).
+pub type DrawPictures = craft_print::DrawPictures;
+
+/// [`submit_with_progress`] for a job printed as pictures (Thai edition): on Windows the sheets go
+/// to the spooler as the multi-page TIFF `pictures` draws from the final print-ready PDF, at its
+/// full resolution (`Windows.Data.Pdf` resamples pictures to 96 dpi and crashes on Type 3 text);
+/// elsewhere `pdf` is submitted as usual.
+pub fn submit_pictures_with_progress(
+    pdf: &[u8],
+    job: &Job,
+    pictures: &DrawPictures,
+    progress: &mut dyn FnMut(usize, usize),
+) -> Result<String, crate::PrintError> {
+    craft_print::submit_pictures_with_progress(pdf, job, pictures, progress).map_err(|e| crate::PrintError::Spool(e.to_string()))
+}
+
 pub fn open_printer_preferences(printer: &str) -> Result<(), crate::PrintError> {
     craft_print::open_printer_preferences(printer).map_err(|e| crate::PrintError::Spool(e.to_string()))
 }

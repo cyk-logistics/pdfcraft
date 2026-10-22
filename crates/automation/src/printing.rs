@@ -174,6 +174,22 @@ impl Automation {
                         Some(_) => return Err(bad("options must be an object of option keys and choices from printer_options")),
                     },
                 };
+                // Windows (Thai edition): a job printed as pictures (as_image, or Type 3 text, which
+                // Windows' PDF print path crashes on) is drawn from the vector print-ready sheets at
+                // its resolution and spooled as pictures, which Windows.Data.Pdf would have
+                // resampled to 96 dpi. The answer says when and why.
+                #[cfg(target_os = "windows")]
+                {
+                    let vector = self.session.print_pdf(id, &print::Settings { raster: None, ..settings.clone() }).map_err(failed)?;
+                    if let Some((r, type3)) = print::picture_raster(&settings, &vector) {
+                        out["as_image"] =
+                            json!({ "dpi": r.dpi, "reason": if type3 { "type3 fonts crash the Windows print path" } else { "as_image" } });
+                        let pictures = move |pdf: &[u8]| pdfcraft_engine::print_raster::sheets_as_tiff(pdf, r.dpi, r.grayscale);
+                        out["job"] =
+                            json!(spool::submit_pictures_with_progress(&vector, &job, &pictures, &mut |_, _| {}).map_err(|e| failed(e.to_string()))?);
+                        return Ok(out);
+                    }
+                }
                 out["job"] = json!(spool::submit(&bytes, &job).map_err(|e| failed(e.to_string()))?);
             }
             _ => return Err(bad("pass either path (save the print-ready PDF) or printer (a name from printers, or \"default\")")),

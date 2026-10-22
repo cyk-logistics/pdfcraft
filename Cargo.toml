@@ -117,3 +117,8 @@ lopdf = { path = "vendor/lopdf" }
 winit = { path = "vendor/winit" }
 egui-wgpu = { path = "vendor/egui-wgpu" }
 vello_common = { path = "vendor/vello_common" }
+
+# craft-print (git, storytold/craft-libs) with a PdfCraft patch: print-as-image jobs go to the
+# Windows spooler as pictures at their own resolution (see vendor/README.md).
+[patch."https://github.com/storytold/craft-libs"]
+craft-print = { path = "vendor/craft-print" }

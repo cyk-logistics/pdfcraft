@@ -1,6 +1,7 @@
 # PdfCraft ภาษาไทย (ฉบับไม่เป็นทางการ)
 
 PdfCraft ฉบับปรับปรุงให้ใช้งานภาษาไทยได้เต็มรูปแบบ ต่อยอดจาก [PdfCraft](https://github.com/storytold/pdfcraft) ของ ArtCraft
+พัฒนาฉบับภาษาไทยโดย **Non.sittith**
 **ฉบับนี้ไม่ใช่ฉบับทางการ** และไม่ได้อยู่ในความดูแลของผู้พัฒนา PdfCraft หากพบปัญหาในฉบับนี้ โปรดแจ้งที่ Issues ของ repository นี้ ไม่ใช่ที่โปรเจกต์ต้นฉบับ
 
 > English: an unofficial Thai edition of PdfCraft (Thai UI, Thai text editing, TH Sarabun PSK,

@@ -2702,3 +2702,4 @@ key	Space	Space
 	Copy to another page	Sao chép sang trang khác
 	Copy object	Sao chép đối tượng
 	Comments are always in front of the page's text and images. Placed on the page, this one becomes a picture you can move, resize and send behind them; it is no longer a comment.	Nhận xét luôn nằm trước văn bản và hình ảnh của trang. Khi đặt lên trang, nhận xét này trở thành một hình ảnh bạn có thể di chuyển, đổi kích thước và đưa ra phía sau chúng; nó không còn là nhận xét nữa.
+	This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).	Tệp này có văn bản bằng phông chữ Type 3 mà chức năng in của Windows không xử lý được, nên tệp được in dưới dạng hình ảnh (600 dpi).

@@ -2592,3 +2592,4 @@ animation effects	Off	Desactivados
 # Historical snapshot notice bar (View signed version / View revision).
 	You are viewing the signed version of “{from}” (revision {rev}). It is a snapshot: changes here won't affect the original.	Estás viendo la versión firmada de «{from}» (revisión {rev}). Es una instantánea: los cambios aquí no afectarán al original.
 	You are viewing revision {rev} of “{from}”. It is a snapshot: changes here won't affect the original.	Estás viendo la revisión {rev} de «{from}». Es una instantánea: los cambios aquí no afectarán al original.
+	This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).	Este archivo tiene texto en una fuente Type 3, que la impresión de Windows no puede procesar, así que se imprime como imagen (600 ppp).

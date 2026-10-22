@@ -502,6 +502,9 @@ fn the_about_dialog_shows_the_running_version() {
     h.run_steps(3);
     // The Thai edition's version, -th.N included (Thai edition).
     h.get_by_label_contains(&format!("Version {}", pdfcraft_engine::build_info::edition_version()));
+    // The Thai edition's credit names its developer, beside its mark.
+    h.get_by_label_contains("Non.sittith");
+    h.get_by_label("PdfCraft ภาษาไทย");
 }
 
 #[test]

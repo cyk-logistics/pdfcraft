@@ -2452,3 +2452,4 @@ animation effects	Off	Désactivés
 	Make properties default	Définir comme propriétés par défaut
 	Pages selected	Pages sélectionnées
 	Page properties	Propriétés de la page
+	This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).	Ce fichier contient du texte en police Type 3, que l'impression de Windows ne sait pas traiter : il est donc imprimé comme image (600 ppp).

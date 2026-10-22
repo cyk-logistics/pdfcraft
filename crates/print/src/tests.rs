@@ -744,3 +744,90 @@ fn imposed_pages_preserve_large_user_unit_matrices() {
         }
     }
 }
+
+/// A one-page PDF whose text is drawn in `font` (a font dictionary), as raw bytes.
+fn one_page_with_font(font: &str) -> Vec<u8> {
+    let body = "BT /F1 24 Tf 20 150 Td <01> Tj 0 -30 Td <02> Tj ET";
+    let glyph = "500 0 d0 0 0 m 400 0 l 400 400 l h f";
+    let objs = [
+        "<< /Type /Catalog /Pages 2 0 R >>".to_string(),
+        "<< /Type /Pages /Kids [3 0 R] /Count 1 /MediaBox [0 0 200 300] >>".to_string(),
+        "<< /Type /Page /Parent 2 0 R /Contents 4 0 R /Resources << /Font << /F1 5 0 R >> >> >>".to_string(),
+        format!("<< /Length {} >>\nstream\n{body}\nendstream", body.len()),
+        font.to_string(),
+        format!("<< /Length {} >>\nstream\n{glyph}\nendstream", glyph.len()),
+    ];
+    let mut out = b"%PDF-1.7\n".to_vec();
+    let mut offs = Vec::new();
+    for (i, o) in objs.iter().enumerate() {
+        offs.push(out.len());
+        out.extend_from_slice(format!("{} 0 obj\n{o}\nendobj\n", i + 1).as_bytes());
+    }
+    let x = out.len();
+    out.extend_from_slice(format!("xref\n0 {}\n0000000000 65535 f \n", objs.len() + 1).as_bytes());
+    for o in offs {
+        out.extend_from_slice(format!("{o:010} 00000 n \n").as_bytes());
+    }
+    out.extend_from_slice(format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", objs.len() + 1).as_bytes());
+    out
+}
+
+/// Thai edition: Windows' print path crashes on Type 3 text, so print-ready PDFs that use a Type 3
+/// font are found — also after imposing, where objects may sit in object streams.
+#[test]
+fn print_ready_pdfs_with_type3_fonts_are_found() {
+    let type3 = "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 500 500] /FontMatrix [0.001 0 0 0.001 0 0] /FirstChar 1 /LastChar 2 /Widths [500 500] /Encoding << /Type /Encoding /Differences [1 /a /b] >> /CharProcs << /a 6 0 R /b 6 0 R >> >>";
+    let raw = one_page_with_font(type3);
+    assert!(uses_type3_fonts(&raw));
+    let imposed = impose(&Document::open(Arc::new(raw)).unwrap(), &settings(vec![0], Layout::Size(SizeMode::Fit))).unwrap();
+    assert!(uses_type3_fonts(&imposed), "still found in the imposed print-ready PDF");
+    // A standard font, the fixture's Helvetica pages imposed, and a file that isn't a PDF: none.
+    let helvetica = one_page_with_font("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    assert!(!uses_type3_fonts(&helvetica));
+    // A Type 3 font written inline in the page's /Resources, as PdfCraft writes shaped Thai text
+    // into existing pages (a Word file edited in PdfCraft crashed printing this way).
+    let inline = String::from_utf8(one_page_with_font("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>"))
+        .unwrap()
+        .replace("/Resources << /Font << /F1 5 0 R >> >>", &format!("/Resources << /Font << /F1 5 0 R /PCSh {type3} >> >>"));
+    let inline = fix_xref(inline.into_bytes());
+    assert!(uses_type3_fonts(&inline), "an inline Type 3 font is found");
+    assert!(uses_type3_fonts(&impose(&Document::open(Arc::new(inline)).unwrap(), &settings(vec![0], Layout::Size(SizeMode::Fit))).unwrap()));
+    assert!(!uses_type3_fonts(&impose(&fixture(3), &settings(vec![0, 1, 2], Layout::Size(SizeMode::Fit))).unwrap()));
+    assert!(!uses_type3_fonts(b"not a pdf"));
+}
+
+/// Thai edition: a Windows job is printed as pictures at its own Print as image setting, else at
+/// 600 dpi when its print-ready PDF has Type 3 text; other jobs print as they are.
+#[test]
+fn windows_jobs_print_as_pictures_for_print_as_image_or_type3_text() {
+    let type3 = "<< /Type /Font /Subtype /Type3 /FontBBox [0 0 500 500] /FontMatrix [0.001 0 0 0.001 0 0] /FirstChar 1 /LastChar 2 /Widths [500 500] /Encoding << /Type /Encoding /Differences [1 /a /b] >> /CharProcs << /a 6 0 R /b 6 0 R >> >>";
+    let pdf = one_page_with_font(type3);
+    let plain = settings(vec![0], Layout::Size(SizeMode::Actual));
+    assert_eq!(picture_raster(&plain, &pdf), Some((Raster { dpi: TYPE3_FALLBACK_DPI, grayscale: false }, true)));
+    let asked = Settings { raster: Some(Raster { dpi: 150.0, grayscale: true }), ..plain.clone() };
+    assert_eq!(picture_raster(&asked, &pdf), Some((Raster { dpi: 150.0, grayscale: true }, false)), "the user's own setting stays");
+    let helvetica = one_page_with_font("<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>");
+    assert_eq!(picture_raster(&plain, &helvetica), None);
+    assert_eq!(picture_raster(&asked, &helvetica), Some((Raster { dpi: 150.0, grayscale: true }, false)));
+}
+
+/// `pdf` with its xref table rebuilt, after an edit changed object lengths.
+fn fix_xref(pdf: Vec<u8>) -> Vec<u8> {
+    let text = String::from_utf8(pdf).unwrap();
+    let body_end = text.find("xref\n").unwrap();
+    let mut body = text[..body_end].to_string();
+    let mut offs = Vec::new();
+    let mut at = 0;
+    while let Some(i) = body[at..].find(" 0 obj\n") {
+        let start = body[..at + i].rfind('\n').map_or(0, |n| n + 1);
+        offs.push(start);
+        at += i + 7;
+    }
+    let x = body.len();
+    body.push_str(&format!("xref\n0 {}\n0000000000 65535 f \n", offs.len() + 1));
+    for o in &offs {
+        body.push_str(&format!("{o:010} 00000 n \n"));
+    }
+    body.push_str(&format!("trailer\n<< /Size {} /Root 1 0 R >>\nstartxref\n{x}\n%%EOF\n", offs.len() + 1));
+    body.into_bytes()
+}

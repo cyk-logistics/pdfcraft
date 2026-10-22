@@ -2699,3 +2699,4 @@ key	Space	Space
 	“{name}” changed on disk after it was opened or last saved. Saving now replaces that newer version with this one.	“{name}” ถูกเปลี่ยนบนดิสก์หลังจากเปิดหรือบันทึกครั้งล่าสุด การบันทึกตอนนี้จะแทนที่ฉบับที่ใหม่กว่านั้นด้วยฉบับนี้
 @id	file.word_count	นับคำ…
 theme	Appearance	ลักษณะที่ปรากฏ
+	This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).	ไฟล์นี้มีข้อความแบบอักษร Type 3 ซึ่งการพิมพ์ของ Windows รองรับไม่ได้ จึงพิมพ์เป็นรูปภาพแทน (600 dpi)
