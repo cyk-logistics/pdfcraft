@@ -39,8 +39,15 @@ pub fn show(app: &mut PdfCraftApp, ui: &mut egui::Ui) {
                     // Unofficial edition: no ArtCraft marks or community card (docs/brand/LICENSE-brand.txt);
                     // questions about this build go to its own repository.
                     ui.set_width(ui.available_width());
-                    ui.label(egui::RichText::new(crate::THAI_EDITION_NOTE).font(theme::semibold(15.0)));
-                    ui.hyperlink(crate::THAI_EDITION_URL);
+                    ui.horizontal(|ui| {
+                        crate::thai_edition_mark(ui, 56.0);
+                        ui.add_space(6.0);
+                        ui.vertical(|ui| {
+                            ui.label(egui::RichText::new(crate::THAI_EDITION_NOTE).font(theme::semibold(15.0)));
+                            ui.label(egui::RichText::new(crate::THAI_EDITION_AUTHOR).color(t.text_muted));
+                            ui.hyperlink(crate::THAI_EDITION_URL);
+                        });
+                    });
                 });
             ui.add_space(22.0);
 

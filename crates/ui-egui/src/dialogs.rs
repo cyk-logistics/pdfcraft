@@ -1171,8 +1171,15 @@ fn dialogs(app: &mut PdfCraftApp, ctx: &egui::Context) {
                         ui.add_space(12.0);
                         // Unofficial edition: the ArtCraft marks are removed, as docs/brand/LICENSE-brand.txt
                         // asks of modified versions; the upstream project is named in plain text.
-                        ui.label(egui::RichText::new(crate::THAI_EDITION_NOTE).color(t.text_muted));
-                        ui.hyperlink(crate::THAI_EDITION_URL);
+                        ui.horizontal(|ui| {
+                            crate::thai_edition_mark(ui, 72.0);
+                            ui.add_space(8.0);
+                            ui.vertical(|ui| {
+                                ui.label(egui::RichText::new(crate::THAI_EDITION_NOTE).color(t.text_muted));
+                                ui.label(egui::RichText::new(crate::THAI_EDITION_AUTHOR).color(t.text_muted));
+                                ui.hyperlink(crate::THAI_EDITION_URL);
+                            });
+                        });
                     }
                 }
             }

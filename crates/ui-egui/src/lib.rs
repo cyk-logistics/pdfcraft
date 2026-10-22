@@ -31,6 +31,64 @@ macro_rules! tl_ctx {
 /// Shown on the home screen and in About in place of the ArtCraft marks, which modified versions
 /// must not carry (docs/brand/LICENSE-brand.txt).
 pub(crate) const THAI_EDITION_NOTE: &str = "PdfCraft ภาษาไทย (ฉบับไม่เป็นทางการ) · ต่อยอดจาก PdfCraft โดยทีม ArtCraft";
+/// Who develops the Thai edition, under [`THAI_EDITION_NOTE`].
+pub(crate) const THAI_EDITION_AUTHOR: &str = "พัฒนาฉบับภาษาไทยโดย Non.sittith";
+
+/// The Thai edition's small mark beside its credit (home screen and About): a cat in a hoodie,
+/// made by the edition's developer (`thai/brand/`, ATTRIBUTION.toml), `height` points tall.
+/// The PNG is decoded here once per context: the image loaders are built for SVG only. A picture
+/// that can't be decoded leaves the space empty.
+pub(crate) fn thai_edition_mark(ui: &mut egui::Ui, height: f32) -> egui::Response {
+    const PNG: &[u8] = include_bytes!("../../../thai/brand/thai-edition-cat.png");
+    let id = egui::Id::new("thai-edition-mark");
+    let texture = match ui.ctx().data(|d| d.get_temp::<Option<egui::TextureHandle>>(id)) {
+        Some(cached) => cached,
+        None => {
+            let decoded = thai_edition_mark_pixels(PNG).map(|(size, rgba)| {
+                ui.ctx().load_texture("thai-edition-mark", egui::ColorImage::from_rgba_unmultiplied(size, &rgba), egui::TextureOptions::LINEAR)
+            });
+            ui.ctx().data_mut(|d| d.insert_temp(id, decoded.clone()));
+            decoded
+        }
+    };
+    let size = match &texture {
+        Some(t) if t.size()[1] > 0 => egui::vec2(height * t.size()[0] as f32 / t.size()[1] as f32, height),
+        _ => egui::vec2(height * 0.75, height),
+    };
+    match texture {
+        Some(t) => ui.add(egui::Image::new((t.id(), size)).alt_text("PdfCraft ภาษาไทย")),
+        None => ui.allocate_response(size, egui::Sense::hover()),
+    }
+}
+
+/// The mark's size and 8-bit RGBA pixels; `None` for anything else (it ships as 8-bit RGBA).
+fn thai_edition_mark_pixels(png_bytes: &[u8]) -> Option<([usize; 2], Vec<u8>)> {
+    let mut reader = png::Decoder::new(std::io::Cursor::new(png_bytes)).read_info().ok()?;
+    if reader.output_color_type() != (png::ColorType::Rgba, png::BitDepth::Eight) {
+        return None;
+    }
+    let mut buf = vec![0; reader.output_buffer_size()?];
+    let info = reader.next_frame(&mut buf).ok()?;
+    let (w, h) = (info.width as usize, info.height as usize);
+    buf.truncate(w.checked_mul(h)?.checked_mul(4)?);
+    (buf.len() == w * h * 4 && w > 0 && h > 0).then_some(([w, h], buf))
+}
+
+#[cfg(test)]
+mod thai_edition_mark_tests {
+    /// The shipped mark decodes (the interface's image loaders take SVG only, so a PNG given to
+    /// them showed a broken-image sign instead), and anything that isn't 8-bit RGBA is refused.
+    #[test]
+    fn the_mark_decodes_and_other_pictures_are_refused() {
+        let png = include_bytes!("../../../thai/brand/thai-edition-cat.png");
+        let (size, rgba) = super::thai_edition_mark_pixels(png).expect("the shipped mark decodes");
+        assert_eq!(size, [143, 192]);
+        assert_eq!(rgba.len(), 143 * 192 * 4);
+        assert!(rgba.chunks(4).any(|p| p[3] == 0) && rgba.chunks(4).any(|p| p[3] == 255), "it keeps its transparent background");
+        assert!(super::thai_edition_mark_pixels(b"not a png").is_none());
+        assert!(super::thai_edition_mark_pixels(&png[..png.len() / 2]).is_none(), "a cut-off file");
+    }
+}
 pub(crate) const THAI_EDITION_URL: &str = "https://github.com/mixlnwuu/pdfcraft";
 
 mod a11y_ui;

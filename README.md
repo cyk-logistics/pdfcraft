@@ -14,6 +14,8 @@ application, with full Thai support:
 Downloads for Windows are on the [Releases](../../releases) page. To build it yourself, run
 `thai\build-windows.ps1` (see [README-TH.md](README-TH.md)).
 
+The Thai edition is developed by Non.sittith.
+
 This edition is based on PdfCraft by the ArtCraft team (upstream release v0.10.1). It is not made,
 endorsed or supported by the ArtCraft team. Please report problems with it here, not upstream.
 As the ArtCraft brand terms require of modified versions, the ArtCraft logos have been removed from
