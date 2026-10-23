@@ -1432,22 +1432,38 @@ pub(crate) fn install_source_fonts(ctx: &egui::Context, doc: &pdfcraft_engine::D
     families
 }
 
-/// The editor's look, with the font the pointer rests on in the font menu standing in for its
-/// family: a preview, nothing is applied until the font is clicked.
+/// The editor's look, with what the pointer rests on in Format text (a font, a size, a colour, or
+/// bold or italic turned the other way) standing in: a preview, nothing is applied until it is
+/// clicked (Thai edition).
 fn shown_look(ctx: &egui::Context, ed: &LineEditor) -> pdfcraft_engine::AddedText {
     let mut look = ed.look.clone();
-    if let Some(family) = crate::content_ui::previewed_family(ctx) {
-        look.family = family;
+    if let Some(preview) = crate::content_ui::previewed_look(ctx) {
+        preview.apply(&mut look);
     }
     look
+}
+
+/// Whether the editor shows its text underlined: as set, or as the pointer on Underline previews.
+fn shown_underline(ctx: &egui::Context, ed: &LineEditor) -> bool {
+    crate::content_ui::previewed_look(ctx).and_then(|p| p.underline).unwrap_or(ed.extras.underline)
+}
+
+/// The stroke that underlines editor text of `size` (screen points) in `color`.
+fn underline_stroke(on: bool, size: f32, color: Color32) -> egui::Stroke {
+    if on { egui::Stroke::new((size * 0.06).max(1.0), color) } else { egui::Stroke::NONE }
 }
 
 fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32) -> egui::text::LayoutJob {
     let mut job = egui::text::LayoutJob::default();
     let ed_look = shown_look(ui.ctx(), ed);
+    let underline = shown_underline(ui.ctx(), ed);
     // An unchanged PDF row already has an authoritative line break. Do not rewrap it
     // because font rounding or a fallback face measures a fraction of a pixel wider.
-    job.wrap.max_width = if text == ed.original && ed_look == ed.look0 && ed.extras == ed.extras0 { f32::INFINITY } else { width };
+    job.wrap.max_width = if text == ed.original && ed_look == ed.look0 && ed.extras == ed.extras0 && underline == ed.extras0.underline {
+        f32::INFINITY
+    } else {
+        width
+    };
     if let Some((block, lines)) = &ed.source {
         let lefts: Vec<_> = block.rows.iter().filter_map(|r| r.first().and_then(|i| lines.get(*i)).map(|l| l.rect[0])).collect();
         let left_span = lefts.iter().copied().fold(f64::NEG_INFINITY, f64::max) - lefts.iter().copied().fold(f64::INFINITY, f64::min);
@@ -1494,6 +1510,7 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
             let native_width = ui.fonts_mut(|f| f.layout_no_wrap(line.text.clone(), font.clone(), Color32::BLACK).size().x);
             let target_width = ((line.rect[2] - line.rect[0]) * look.size / line.size.max(0.01)) as f32 * scale;
             let spacing = if original_face { (target_width - native_width) / line.text.chars().count().saturating_sub(1).max(1) as f32 } else { 0.0 };
+            let size = font.size;
             job.append(
                 text.get(range).unwrap_or_default(),
                 0.0,
@@ -1502,6 +1519,7 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
                     extra_letter_spacing: spacing + ed.extras.char_spacing as f32 * scale,
                     color: color32(look.color),
                     italics: look.italic && !embedded && !own_face,
+                    underline: underline_stroke(underline, size, color32(look.color)),
                     ..Default::default()
                 },
             );
@@ -1511,9 +1529,10 @@ fn editor_job(ui: &egui::Ui, ed: &LineEditor, text: &str, scale: f32, width: f32
             text,
             0.0,
             egui::TextFormat {
-                font_id: editor_font(ui.ctx(), &ed_look, ed.size),
+                font_id: editor_font(ui.ctx(), &ed_look, (ed_look.size as f32 * scale).clamp(1.0, 300.0)),
                 color: color32(ed_look.color),
                 italics: ed_look.italic && ed_look.family.craft(ed_look.bold, ed_look.italic).is_none(),
+                underline: underline_stroke(underline, (ed_look.size as f32 * scale).clamp(1.0, 300.0), color32(ed_look.color)),
                 ..Default::default()
             },
         );
@@ -1704,7 +1723,9 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
             // the draft no longer occupies. Shrinking the text must never expose a copy. Both are
             // decided after this frame's typing, in places kept under the editor's text.
             let cover = ui.painter().add(egui::Shape::Noop);
-            let unchanged = !ed.has_changes();
+            // A preview from Format text shows in the editor, as a change would (Thai edition).
+            let previewing = crate::content_ui::previewed_look(ui.ctx()).is_some();
+            let unchanged = !ed.has_changes() && !previewing;
             egui::Frame::NONE.show(ui, |ui| {
                 // A textless PDF preview, or the page itself, keeps its real background through
                 // the transparent editor. The temporary opaque cover uses the shared caret-contrast rule.
@@ -1717,7 +1738,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
                 let snapshot = ed.clone();
                 let mut layouter = |ui: &egui::Ui, text: &dyn egui::TextBuffer, wrap_width: f32| {
                     let galley = editor_galley(ui, &snapshot, text.as_str(), scale, wrap_width);
-                    if snapshot.changes_with(text.as_str()) { galley } else { unseen(galley) }
+                    if previewing || snapshot.changes_with(text.as_str()) { galley } else { unseen(galley) }
                 };
                 let output = egui::TextEdit::multiline(&mut ed.text)
                     .id(egui::Id::new("edit-text-line-input"))
@@ -1729,7 +1750,7 @@ pub(crate) fn overlay(ctx: &egui::Context, view: &mut DocView, info: &DocInfo) -
                     .desired_width(width)
                     .desired_rows(rows)
                     .show(ui);
-                if ed.has_changes() {
+                if ed.has_changes() || previewing {
                     if background_ready {
                         reveal = true;
                     } else {

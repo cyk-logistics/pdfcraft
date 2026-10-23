@@ -2090,6 +2090,12 @@ fn other_colour_swatch(ui: &mut egui::Ui, open: bool) -> egui::Response {
 /// quick colours offer) and, once used, the recent custom colours; returns the colour chosen.
 /// The "+" sits in the first row, so the grid is no taller than before until the picker opens.
 pub fn swatch_grid(ui: &mut egui::Ui, current: Option<Rgb>) -> Option<Rgb> {
+    swatch_grid_hover(ui, current, &mut None)
+}
+
+/// [`swatch_grid`]; `hovered` gets the swatch under the pointer (Thai edition: Format text
+/// previews it on the text).
+pub fn swatch_grid_hover(ui: &mut egui::Ui, current: Option<Rgb>, hovered: &mut Option<Rgb>) -> Option<Rgb> {
     let mut picked = None;
     let on = |c: &Rgb| current.is_some_and(|cur| same_colour(&cur, c));
     // Keyed on this grid's own place in the parent, so two grids in one dialog open their
@@ -2101,7 +2107,11 @@ pub fn swatch_grid(ui: &mut egui::Ui, current: Option<Rgb>) -> Option<Rgb> {
     let mut open = ui.data(|d| d.get_temp::<bool>(open_id)).unwrap_or(false);
     egui::Grid::new(base.with("swatches")).spacing(vec2(6.0, 6.0)).show(ui, |ui| {
         for (i, (name, c)) in SWATCHES.iter().enumerate() {
-            if swatch(ui, *c, on(c), tl!(name)).clicked() {
+            let resp = swatch(ui, *c, on(c), tl!(name));
+            if resp.hovered() {
+                *hovered = Some(*c);
+            }
+            if resp.clicked() {
                 picked = Some(*c);
             }
             if i == 4 && other_colour_swatch(ui, open).clicked() {
@@ -2121,7 +2131,11 @@ pub fn swatch_grid(ui: &mut egui::Ui, current: Option<Rgb>) -> Option<Rgb> {
             ui.spacing_mut().item_spacing.x = 6.0;
             for c in &recent {
                 let [r, g, b, _] = color32(*c).to_array();
-                if swatch(ui, *c, on(c), &format!("#{r:02X}{g:02X}{b:02X}")).clicked() {
+                let resp = swatch(ui, *c, on(c), &format!("#{r:02X}{g:02X}{b:02X}"));
+                if resp.hovered() {
+                    *hovered = Some(*c);
+                }
+                if resp.clicked() {
                     picked = Some(*c);
                 }
             }

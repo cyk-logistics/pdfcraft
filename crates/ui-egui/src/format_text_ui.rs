@@ -73,6 +73,8 @@ fn number(v: f64) -> String {
 pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras: Option<&mut Extras>, fonts: Fonts) -> Outcome {
     let before = (look.clone(), extras.as_deref().copied());
     let mut out = Outcome::default();
+    // What the pointer rests on, previewed on the text (Thai edition).
+    let mut hover = crate::content_ui::LookPreview::default();
     widgets::section_title(ui, tl!("Format text"));
 
     // The font, across the panel.
@@ -98,7 +100,7 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras:
             // Thai edition: the standard families, TH Sarabun PSK and the families installed on
             // this machine, with a search box, as Add text has always offered them.
             let search = ui.make_persistent_id("format-font-search");
-            if let Some(f) = crate::content_ui::family_list(ui, search, fonts.sources.is_none().then_some(look.family)) {
+            if let Some(f) = crate::content_ui::family_list(ui, search, fonts.sources.is_none().then_some(look.family), &mut hover.family) {
                 out.font = Some(FontChoice::Family(f));
             }
             if fonts.sources.is_some() {
@@ -132,10 +134,10 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras:
     // Size and colour | bullets, numbering and alignment.
     row(ui, |ui| {
         // Any size from 1 to 500 pt can be typed, with the usual ones in a list (Thai edition).
-        crate::content_ui::size_control(ui, &mut look.size);
+        crate::content_ui::size_control(ui, &mut look.size, &mut hover.size);
         let swatch = colour_button(ui, t, look.color);
         egui::Popup::menu(&swatch).show(|ui| {
-            if let Some(picked) = crate::comments::swatch_grid(ui, Some(look.color)) {
+            if let Some(picked) = crate::comments::swatch_grid_hover(ui, Some(look.color), &mut hover.color) {
                 look.color = picked;
                 ui.close();
             }
@@ -172,17 +174,23 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras:
     // Bold, italic, underline, superscript, subscript.
     let mut extras = extras;
     row(ui, |ui| {
-        if icons::button(ui, "bold", 30.0, look.bold, tl!("Bold")).clicked() {
+        let bold = icons::button(ui, "bold", 30.0, look.bold, tl!("Bold"));
+        if bold.clicked() {
             look.bold = !look.bold;
         }
-        if icons::button(ui, "italic", 30.0, look.italic, tl!("Italic")).clicked() {
+        hover.bold = toggle_preview(ui, &bold, look.bold);
+        let italic = icons::button(ui, "italic", 30.0, look.italic, tl!("Italic"));
+        if italic.clicked() {
             look.italic = !look.italic;
         }
+        hover.italic = toggle_preview(ui, &italic, look.italic);
         match extras.as_deref_mut() {
             Some(e) => {
-                if icons::button(ui, "underline", 30.0, e.underline, tl!("Underline")).clicked() {
+                let underline = icons::button(ui, "underline", 30.0, e.underline, tl!("Underline"));
+                if underline.clicked() {
                     e.underline = !e.underline;
                 }
+                hover.underline = toggle_preview(ui, &underline, e.underline);
             }
             None => planned(ui, "underline", tl!("Underline")),
         }
@@ -231,9 +239,23 @@ pub(crate) fn panel(ui: &mut egui::Ui, t: &Tokens, look: &mut AddedText, extras:
     });
 
     out.changed = (look.clone(), extras.as_deref().copied()) != before;
+    crate::content_ui::note_hover(ui.ctx(), Some(hover));
     ui.add_space(6.0);
     ui.separator();
     out
+}
+
+/// What resting the pointer on a style button (now `on`) previews: the style turned the other way.
+/// Not right after a click on it, which already shows the new style: until the pointer leaves.
+fn toggle_preview(ui: &egui::Ui, resp: &egui::Response, on: bool) -> Option<bool> {
+    let id = resp.id.with("clicked-here");
+    if resp.clicked() {
+        ui.data_mut(|d| d.insert_temp(id, true));
+    } else if !resp.hovered() {
+        ui.data_mut(|d| d.remove::<bool>(id));
+    }
+    let clicked_here = ui.data(|d| d.get_temp::<bool>(id)).unwrap_or(false);
+    (resp.hovered() && !clicked_here).then_some(!on)
 }
 
 /// One row of the panel, [`ROW`] high, its controls [`GAP`] apart and centred on it.

@@ -679,7 +679,7 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
             && cv.grab.is_none()
             && cv.draft.is_none()
             && let AddedContent::Text(t) = &a.content
-            && let Some(previewed) = paint_family_preview(ui, painter, xf, page, info, t)
+            && let Some(previewed) = paint_look_preview(ui, painter, xf, page, info, t)
         {
             r = previewed;
         }
@@ -920,7 +920,7 @@ pub(crate) fn family_menu(ui: &mut egui::Ui, family: &mut FontFamily) {
         .height(360.0)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show_ui(ui, |ui| {
-            if let Some(f) = family_list(ui, search_id, Some(*family)) {
+            if let Some(f) = family_list(ui, search_id, Some(*family), &mut None) {
                 *family = f;
             }
         });
@@ -928,8 +928,14 @@ pub(crate) fn family_menu(ui: &mut egui::Ui, family: &mut FontFamily) {
 
 /// The inside of a font menu (Thai edition): a search box, the bundled families, then the
 /// families installed on this machine, Thai ones marked TH. Returns the family picked (a click,
-/// or Enter on the first match), which also closes the menu; `current` is ticked.
-pub(crate) fn family_list(ui: &mut egui::Ui, search_id: egui::Id, current: Option<FontFamily>) -> Option<FontFamily> {
+/// or Enter on the first match), which also closes the menu; `current` is ticked and `hovered`
+/// gets the family under the pointer.
+pub(crate) fn family_list(
+    ui: &mut egui::Ui,
+    search_id: egui::Id,
+    current: Option<FontFamily>,
+    hovered: &mut Option<FontFamily>,
+) -> Option<FontFamily> {
     ui.set_min_width(240.0);
     // Opening the menu starts a new search with the caret in the box, so the font's name
     // can be typed straight away.
@@ -947,7 +953,6 @@ pub(crate) fn family_list(ui: &mut egui::Ui, search_id: egui::Id, current: Optio
     let entered = search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
     let want = query.trim().to_lowercase();
     ui.data_mut(|d| d.insert_temp(search_id, query));
-    let mut hovered = None;
     let mut picked = None;
     let mut first = None;
     let mark = ui.visuals().weak_text_color();
@@ -963,7 +968,7 @@ pub(crate) fn family_list(ui: &mut egui::Ui, search_id: egui::Id, current: Optio
             ui.painter().text(at, egui::Align2::RIGHT_CENTER, "TH", egui::FontId::proportional(9.0), mark);
         }
         if resp.hovered() {
-            hovered = Some(f);
+            *hovered = Some(f);
         }
         if resp.clicked() {
             picked = Some(f);
@@ -984,13 +989,13 @@ pub(crate) fn family_list(ui: &mut egui::Ui, search_id: egui::Id, current: Optio
         picked = Some(f);
         ui.close();
     }
-    note_hover(ui.ctx(), hovered);
     picked
 }
 
 /// The text size: a box to type any size from 1 to 500 points into (Enter, or a click away,
 /// applies it), with the usual sizes in a list beside it. Each applied size is one undo step.
-pub(crate) fn size_control(ui: &mut egui::Ui, size: &mut f64) {
+/// `hovered` gets the listed size under the pointer.
+pub(crate) fn size_control(ui: &mut egui::Ui, size: &mut f64, hovered: &mut Option<f64>) {
     let shown = |v: f64| if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v}") };
     let id = ui.make_persistent_id("font-size-typed");
     // What is in the box, and the size it was typed over. The text is kept while the box has the
@@ -1020,66 +1025,116 @@ pub(crate) fn size_control(ui: &mut egui::Ui, size: &mut f64) {
     }
     egui::ComboBox::from_id_salt("font-size").selected_text("").width(16.0).show_ui(ui, |ui| {
         for preset in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0, 72.0] {
-            ui.selectable_value(size, preset, format!("{preset} pt"));
+            if ui.selectable_value(size, preset, format!("{preset} pt")).hovered() {
+                *hovered = Some(preset);
+            }
         }
     });
 }
 
-/// The font menu entry under the pointer: (family, when the pointer reached it, when it was last
-/// seen there).
-type FamilyHover = (FontFamily, f64, f64);
-
-fn hover_id() -> egui::Id {
-    egui::Id::new("added-text-font-hover")
+/// What the pointer rests on in Format text, shown on the selected text or in the open editor
+/// before it is picked (Thai edition): a font, a size or a colour from their lists, or bold,
+/// italic or underline turned the other way. Nothing is applied until it is clicked.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct LookPreview {
+    pub family: Option<FontFamily>,
+    pub size: Option<f64>,
+    pub color: Option<[f64; 3]>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    /// Paragraphs only: added text has no underline yet.
+    pub underline: Option<bool>,
 }
 
-/// How long the pointer rests on a font before the selected text previews it (a sweep down the
-/// list loads nothing), and how long a preview outlives the last frame that saw the pointer there.
+impl LookPreview {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// `look` as previewed.
+    pub fn apply(&self, look: &mut AddedText) {
+        if let Some(f) = self.family {
+            look.family = f;
+        }
+        if let Some(v) = self.size {
+            look.size = v;
+        }
+        if let Some(c) = self.color {
+            look.color = c;
+        }
+        if let Some(b) = self.bold {
+            look.bold = b;
+        }
+        if let Some(i) = self.italic {
+            look.italic = i;
+        }
+    }
+}
+
+/// The preview under the pointer: (what, when the pointer reached it, when it was last seen there).
+type LookHover = (LookPreview, f64, f64);
+
+fn hover_id() -> egui::Id {
+    egui::Id::new("format-text-look-hover")
+}
+
+/// How long the pointer rests on a choice before the text previews it (a sweep down a list loads
+/// nothing), and how long a preview outlives the last frame that saw the pointer there.
 const HOVER_DWELL: f64 = 0.2;
 const HOVER_FRESH: f64 = 0.25;
 
-fn note_hover(ctx: &egui::Context, hovered: Option<FontFamily>) {
+/// Format text tells, each frame it is drawn, what the pointer rests on (`None`: nothing).
+pub(crate) fn note_hover(ctx: &egui::Context, hovered: Option<LookPreview>) {
     let now = ctx.input(|i| i.time);
-    let before: Option<FamilyHover> = ctx.data(|d| d.get_temp(hover_id()));
-    match hovered {
-        Some(f) => {
-            let since = before.filter(|(family, ..)| *family == f).map_or(now, |(_, since, _)| since);
-            ctx.data_mut(|d| d.insert_temp::<FamilyHover>(hover_id(), (f, since, now)));
+    let before: Option<LookHover> = ctx.data(|d| d.get_temp(hover_id()));
+    match hovered.filter(|h| !h.is_empty()) {
+        Some(h) => {
+            let since = before.filter(|(was, ..)| *was == h).map_or(now, |(_, since, _)| since);
+            ctx.data_mut(|d| d.insert_temp::<LookHover>(hover_id(), (h, since, now)));
             // Wake up for the preview to start, and afterwards to notice the pointer leaving.
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
-        None if before.is_some() => ctx.data_mut(|d| d.remove::<FamilyHover>(hover_id())),
+        None if before.is_some() => {
+            ctx.data_mut(|d| d.remove::<LookHover>(hover_id()));
+            ctx.request_repaint();
+        }
         None => {}
     }
 }
 
-/// The font the pointer rests on in the font menu, to preview on the selected text (Add text)
-/// or in the open editor (Edit text).
-pub(crate) fn previewed_family(ctx: &egui::Context) -> Option<FontFamily> {
+/// The look the pointer rests on in Format text, to preview on the selected text (Add text) or in
+/// the open editor (Edit text).
+pub(crate) fn previewed_look(ctx: &egui::Context) -> Option<LookPreview> {
     let now = ctx.input(|i| i.time);
-    let (family, since, seen): FamilyHover = ctx.data(|d| d.get_temp(hover_id()))?;
+    let (look, since, seen): LookHover = ctx.data(|d| d.get_temp(hover_id()))?;
     if now - seen > HOVER_FRESH {
-        // The menu closed with the pointer on an entry.
-        ctx.data_mut(|d| d.remove::<FamilyHover>(hover_id()));
+        // The panel or a menu closed with the pointer on a choice.
+        ctx.data_mut(|d| d.remove::<LookHover>(hover_id()));
         ctx.request_repaint();
         return None;
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
-    (now - since >= HOVER_DWELL).then_some(family)
+    (now - since >= HOVER_DWELL).then_some(look)
 }
 
-/// The selected text as it would look in the font the pointer rests on in the font menu, drawn
-/// over the page until the pointer moves on. Nothing is changed in the document.
+/// The selected text as it would look with what the pointer rests on in Format text, drawn over
+/// the page until the pointer moves on. Nothing is changed in the document.
 /// Returns the box the previewed text takes, for the selection frame to follow.
-fn paint_family_preview(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, t: &AddedText) -> Option<Rect> {
-    let family = previewed_family(ui.ctx()).filter(|f| *f != t.family)?;
+fn paint_look_preview(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, t: &AddedText) -> Option<Rect> {
+    let preview = previewed_look(ui.ctx())?;
+    let mut look = t.clone();
+    preview.apply(&mut look);
+    if look == *t {
+        return None;
+    }
     let page_width = info.pages.get(page).map(|p| p.width as f64);
-    let shown = restyled(t, AddedText { family, ..t.clone() }, page_width);
+    let shown = restyled(t, look.clone(), page_width);
     let (old, new) = (screen_rect(xf, info, page, t.rect), screen_rect(xf, info, page, shown.rect));
     let zoom = xf.rect.width() / xf.pw.max(1.0);
-    let font = crate::theme::document_font(ui.ctx(), family, t.bold, t.italic, (t.size as f32 * zoom).max(4.0));
-    let [cr, cg, cb] = t.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
-    let galley = painter.layout(t.text.clone(), font, Color32::from_rgb(cr, cg, cb), new.width().max(8.0));
+    let font = crate::theme::document_font(ui.ctx(), look.family, look.bold, look.italic, (look.size as f32 * zoom).max(4.0));
+    let [cr, cg, cb] = look.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+    let color = Color32::from_rgb(cr, cg, cb);
+    let galley = painter.layout(t.text.clone(), font, color, new.width().max(8.0));
     let x = match t.align {
         TextAlign::Left | TextAlign::Justify => new.left(),
         TextAlign::Center => new.center().x - galley.size().x / 2.0,
@@ -1087,7 +1142,7 @@ fn paint_family_preview(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, 
     };
     let text = Rect::from_min_size(Pos2::new(x, new.top()), galley.size());
     painter.rect_filled(old.union(new).union(text).expand(2.0), CornerRadius::ZERO, Color32::WHITE);
-    painter.galley(text.min, galley, Color32::BLACK);
+    painter.galley(text.min, galley, color);
     Some(new.union(text))
 }
 

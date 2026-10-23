@@ -3910,6 +3910,53 @@ fn delete_removes_a_mixed_selection_in_one_undo_step() {
     assert_eq!(counts(&h), (4, 1), "one undo step brings both back");
 }
 
+/// Thai edition: resting the pointer on a choice in Format text previews it in the open
+/// paragraph (here a colour), and moving away takes it back; nothing is applied.
+#[test]
+fn format_text_previews_what_the_pointer_rests_on() {
+    let mut h = harness(1, |_| {});
+    assert!(h.state_mut().execute("edit.edit_text"));
+    h.run_steps(2);
+    let r = h.state().views[0].page_screen_rect(0).expect("on screen");
+    let at = egui::pos2(r.left() + 40.0 / 200.0 * r.width(), r.top() + (300.0 - 158.0) / 300.0 * r.height());
+    double_click(&mut h, at);
+    support::wait_until(&mut h, "the editor's textless page", |app| !app.render_pending());
+    assert!(h.state().views[0].line_editor.is_some());
+    // "Page 1" sits at x 20, its baseline at y 150, 24 pt tall.
+    let text = egui::Rect::from_min_max(
+        egui::pos2(r.left() + 18.0 / 200.0 * r.width(), r.top() + (300.0 - 176.0) / 300.0 * r.height()),
+        egui::pos2(r.left() + 110.0 / 200.0 * r.width(), r.top() + (300.0 - 144.0) / 300.0 * r.height()),
+    );
+    let red = |h: &mut Harness<'static, PdfCraftApp>| {
+        let pixels = h.render().unwrap();
+        (text.top() as u32..text.bottom() as u32)
+            .flat_map(|y| (text.left() as u32..text.right() as u32).map(move |x| (x, y)))
+            .filter(|(x, y)| pixels.get_pixel_checked(*x, *y).is_some_and(|p| p.0[0] > 170 && p.0[1] < 90 && p.0[2] < 90))
+            .count()
+    };
+    assert_eq!(red(&mut h), 0, "black text to start with");
+    h.get_by_label("Colour").click();
+    h.run_steps(2);
+    let swatch = h.get_by_label("Red").rect();
+    // The pointer has to rest a moment; the harness's clock moves only when told to.
+    let tick = |h: &mut Harness<'static, PdfCraftApp>| {
+        let now = h.input().time.unwrap_or(0.0);
+        h.input_mut().time = Some(now + 0.1);
+        h.run_steps(1);
+    };
+    h.hover_at(swatch.center());
+    for _ in 0..6 {
+        tick(&mut h);
+    }
+    assert!(red(&mut h) > 30, "the paragraph previews the colour under the pointer");
+    h.hover_at(egui::pos2(r.right() - 10.0, r.bottom() - 10.0));
+    for _ in 0..4 {
+        tick(&mut h);
+    }
+    assert_eq!(red(&mut h), 0, "moving away takes the preview back");
+    assert!(!dirty(&h), "a preview applies nothing");
+}
+
 /// Ctrl+E opens Edit text & images, and its button on the floating toolbar says so (Thai edition).
 #[test]
 fn ctrl_e_opens_edit_text_and_its_button_shows_the_shortcut() {
