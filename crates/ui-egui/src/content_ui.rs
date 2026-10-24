@@ -117,8 +117,9 @@ impl ContentView {
     }
 }
 
-/// While an added item is moved, the page without it, rendered once per gesture: the item's own
-/// pixels follow the pointer over it instead of staying put until release (#1488).
+/// While an added item is moved, or a picture resized by a corner, the page without it, rendered
+/// once per gesture: the item's own pixels follow the pointer over it instead of staying put until
+/// release (#1488).
 #[derive(Default)]
 pub(crate) struct MoveBackground {
     key: Option<(u64, usize, usize)>,
@@ -127,6 +128,8 @@ pub(crate) struct MoveBackground {
     tag: Option<u64>,
     /// The item's display-space box when the gesture started.
     from: Option<[f64; 4]>,
+    /// The item is a picture: a corner stretches its pixels, and it keeps its whole applied box.
+    picture: bool,
     /// The applied move's box. The page raster on screen still has the item where it was until
     /// its replacement arrives, so the preview stays up until then.
     settling: Option<[f64; 4]>,
@@ -138,8 +141,11 @@ impl MoveBackground {
     }
 
     pub fn prepare(&mut self, ctx: &egui::Context, doc: &pdfcraft_engine::Document, cv: &ContentView, scale: f32) {
+        let picture = |page, index| on_page(doc.added(), page).into_iter().any(|(i, a)| i == index && matches!(a.content, AddedContent::Image(_)));
         let key = match (cv.grab, cv.selected) {
             (Some((gp, Grab::Move, _)), Some((sp, si))) if gp == sp => Some((doc.edit_generation(), sp, si)),
+            // Text resized by a corner rewraps, so only a picture's pixels can follow the corner.
+            (Some((gp, Grab::Corner(..), _)), Some((sp, si))) if gp == sp && picture(sp, si) => Some((doc.edit_generation(), sp, si)),
             _ => None,
         };
         if !(key.is_none() && self.settling.is_some()) && self.key != key {
@@ -147,6 +153,7 @@ impl MoveBackground {
             if let Some((_, page, index)) = key {
                 self.renderer = doc.added_content_preview(page, index).ok().map(|p| p.renderer());
                 self.from = on_page(doc.added(), page).into_iter().find(|(i, _)| *i == index).map(|(_, a)| a.content.rect());
+                self.picture = picture(page, index);
             }
         }
         if self.settling.is_some() {
@@ -216,22 +223,30 @@ impl MoveBackground {
             return;
         }
         let r = screen_rect(xf, info, page, from);
-        let d = if let Some((_, _, start)) = cv.grab {
+        let to = if let Some((_, grab, start)) = cv.grab {
             let Some(p) = ui.input(|i| i.pointer.hover_pos()) else { return };
-            snap_to_centre(ui, xf.rect, r, p - start)
+            let d = if grab == Grab::Move { snap_to_centre(ui, xf.rect, r, p - start) } else { p - start };
+            dragged(r, grab, d, self.picture)
         } else if let Some(to) = self.settling {
+            let to = screen_rect(xf, info, page, to);
             // A moved text box keeps its top edge (its height follows its lines).
-            screen_rect(xf, info, page, to).left_top() - r.left_top()
+            if self.picture { to } else { r.translate(to.left_top() - r.left_top()) }
         } else {
             return;
         };
         let painter = painter.with_clip_rect(painter.clip_rect().intersect(xf.rect));
         xf.paint_image(&painter, background.id(), 0.0, 0.0, 1.0, 1.0);
-        let r = r.expand(1.0);
+        // A pixel around the box, so its edges come along.
+        let (r, to) = (r.expand(1.0), to.expand(1.0));
         let mut mesh = egui::Mesh::with_texture(page_tex);
-        for c in [r.left_top(), r.right_top(), r.right_bottom(), r.left_bottom()] {
-            let (u, v) = xf.screen_to_norm(c);
-            mesh.vertices.push(egui::epaint::Vertex { pos: c + d, uv: Pos2::new(u, v), color: Color32::WHITE });
+        for (a, b) in [
+            (r.left_top(), to.left_top()),
+            (r.right_top(), to.right_top()),
+            (r.right_bottom(), to.right_bottom()),
+            (r.left_bottom(), to.left_bottom()),
+        ] {
+            let (u, v) = xf.screen_to_norm(a);
+            mesh.vertices.push(egui::epaint::Vertex { pos: b, uv: Pos2::new(u, v), color: Color32::WHITE });
         }
         mesh.add_triangle(0, 1, 2);
         mesh.add_triangle(0, 2, 3);
@@ -463,8 +478,13 @@ pub(crate) fn page_input(
         .and_then(|(_, si)| items.iter().find(|(i, _)| *i == si))
         .map(|(_, a)| screen_rect(xf, info, page, a.content.rect()));
     let corner = selected_rect.and_then(|r| handles(r).into_iter().find(|(c, ..)| c.distance(p) <= 6.0));
+    // Cursors only where the page shows: the mode bar and side panels over a page scrolled under
+    // them keep their own (#2755).
+    let shows = resp.contains_pointer();
     if adding_text && hit.is_none() {
-        ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+        if shows {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Text);
+        }
         if resp.clicked() {
             // Text that can't be drawn stays where it is being typed (#125).
             if cv.hold_blocked() {
@@ -489,9 +509,9 @@ pub(crate) fn page_input(
         }
         return consumed;
     }
-    if let Some((_, left, top)) = corner {
+    if let Some((_, left, top)) = corner.filter(|_| shows) {
         ui.ctx().set_cursor_icon(if left == top { egui::CursorIcon::ResizeNwSe } else { egui::CursorIcon::ResizeNeSw });
-    } else if hit.is_some() {
+    } else if hit.is_some() && shows {
         ui.ctx().set_cursor_icon(egui::CursorIcon::Move);
     }
     if resp.drag_started() {
@@ -659,7 +679,7 @@ pub(crate) fn paint_page(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform,
             && cv.grab.is_none()
             && cv.draft.is_none()
             && let AddedContent::Text(t) = &a.content
-            && let Some(previewed) = paint_family_preview(ui, painter, xf, page, info, t)
+            && let Some(previewed) = paint_look_preview(ui, painter, xf, page, info, t)
         {
             r = previewed;
         }
@@ -784,70 +804,67 @@ pub(crate) fn editor(ctx: &egui::Context, view: &mut DocView, info: &DocInfo, ad
     let (mut commit, mut cancel, mut done) = (false, false, false);
     let mut undrawable = None;
     let memo = &view.content.undrawable;
-    egui::Area::new(egui::Id::new(("added-text", view.id.0))).order(egui::Order::Foreground).fixed_pos(r.min).constrain(false).show(ctx, |ui| {
-        let Some(t) = view.content.draft.as_mut() else { return };
-        ui.set_width(r.width() + 64.0);
-        if let Some(source_rect) = source_rect.filter(|_| !background_ready) {
-            ui.painter().rect_filled(source_rect.union(r).expand(1.0), CornerRadius::ZERO, Color32::WHITE);
-        }
-        // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
-        ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
-        let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
-        let font = crate::theme::document_font(ui.ctx(), t.style.family, t.style.bold, t.style.italic, (t.style.size as f32 * zoom).max(8.0));
-        // A box that hugs its text grows as it is typed, as far as the page's right edge.
-        let width = if t.auto {
-            let typed = ui.painter().layout_no_wrap(t.text.clone(), font.clone(), Color32::BLACK).size().x;
-            (typed + 16.0).clamp(60.0, (xf.rect.right() - r.left()).max(60.0))
-        } else {
-            r.width().max(60.0)
-        };
-        // An Area lays out within last frame's size, so a box that grows (a word pasted, or typed
-        // in one go) would widen a step a frame with ✓ and ✕ sliding right under the pointer. Room
-        // to the page's edge plus the buttons lets it take its width at once.
-        ui.set_max_width(width.max(xf.rect.right() - r.left()) + 80.0);
-        ui.horizontal_top(|ui| {
-            ui.spacing_mut().item_spacing.x = 4.0;
-            let resp = ui.add(
-                egui::TextEdit::multiline(&mut t.text)
-                    .font(font)
-                    .desired_width(width)
-                    .desired_rows(1)
-                    .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
-                    .text_color(Color32::from_rgb(cr, cg, cb))
-                    .hint_text(tl!("Type text"))
-                    .id_salt("added-text-edit"),
-            );
-            if t.focus {
-                resp.request_focus();
-                t.focus = false;
+    // Shown at once, like the paragraph editor: a fade-in shows the page's copy through it. Over
+    // the page, so only where the document shows: text scrolled under the mode bar or a side
+    // panel must leave them their pointer (#2755).
+    egui::Area::new(egui::Id::new(("added-text", view.id.0)))
+        .fade_in(false)
+        .order(egui::Order::Foreground)
+        .fixed_pos(r.min)
+        .constrain_to(view.viewport_rect())
+        .constrain(false)
+        .show(ctx, |ui| {
+            let Some(t) = view.content.draft.as_mut() else { return };
+            ui.set_width(r.width() + 64.0);
+            if let Some(source_rect) = source_rect.filter(|_| !background_ready) {
+                ui.painter().rect_filled(source_rect.union(r).expand(1.0), CornerRadius::ZERO, Color32::WHITE);
             }
-            let buttons = egui::Frame::NONE
-                .fill(tokens.card)
-                .stroke(Stroke::new(1.0, tokens.border))
-                .corner_radius(CornerRadius::same(6))
-                .inner_margin(2)
-                .show(ui, |ui| {
-                    ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
-                    ui.horizontal(|ui| {
-                        done = crate::icons::button(ui, "check", 24.0, false, tl!("Done adding text")).clicked();
-                        cancel = crate::icons::button(ui, "x", 24.0, false, tl!("Discard this text (Esc)")).clicked();
-                    });
-                })
-                .response
-                .rect;
-            // Pressing a button takes the focus from the text: that is not a click away.
-            let on_buttons = ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| buttons.contains(p));
-            cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
-            // ⌘Enter is Done, as it applies an edit in Edit text (Thai edition).
-            done |= ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
-            commit = done || resp.lost_focus() && !on_buttons && !view.objects.hold_editor;
+            // The box is white in every theme, so the caret must not follow the theme (pale in dark mode) (#655).
+            ui.visuals_mut().text_cursor.stroke.color = crate::edit_text_ui::caret_color_on(Color32::WHITE);
+            let [cr, cg, cb] = t.style.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+            ui.horizontal_top(|ui| {
+                ui.spacing_mut().item_spacing.x = 4.0;
+                let resp = ui.add(
+                    egui::TextEdit::multiline(&mut t.text)
+                        .font(font)
+                        .desired_width(r.width().max(60.0))
+                        .desired_rows(1)
+                        .background_color(if background_ready { Color32::TRANSPARENT } else { Color32::WHITE })
+                        .text_color(Color32::from_rgb(cr, cg, cb))
+                        .hint_text(tl!("Type text"))
+                        .id_salt("added-text-edit"),
+                );
+                if t.focus {
+                    resp.request_focus();
+                    t.focus = false;
+                }
+                let buttons = egui::Frame::NONE
+                    .fill(tokens.card)
+                    .stroke(Stroke::new(1.0, tokens.border))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(2)
+                    .show(ui, |ui| {
+                        ui.spacing_mut().item_spacing = egui::vec2(2.0, 2.0);
+                        ui.horizontal(|ui| {
+                            done = crate::icons::button(ui, "check", 24.0, false, tl!("Done adding text")).clicked();
+                            cancel = crate::icons::button(ui, "x", 24.0, false, tl!("Discard this text (Esc)")).clicked();
+                        });
+                    })
+                    .response
+                    .rect;
+                // Pressing a button takes the focus from the text: that is not a click away.
+                let on_buttons = ui.input(|i| i.pointer.interact_pos()).is_some_and(|p| buttons.contains(p));
+                cancel |= ui.input(|i| i.key_pressed(egui::Key::Escape));
+                // Ctrl+Enter (⌘Enter) is Done, as it applies an edit in Edit text (Thai edition).
+                done |= ui.input(|i| i.key_pressed(egui::Key::Enter) && i.modifiers.command);
+                commit = done || resp.lost_focus() && !on_buttons && !view.objects.hold_editor;
+            });
+            // Page text is drawn with the standard fonts; anything else would be saved as `?` (#125).
+            undrawable = self::undrawable(t, memo);
+            if let Some(c) = undrawable {
+                ui.label(egui::RichText::new(undrawable_message(c)).small().color(UNDRAWABLE));
+            }
         });
-        // Page text is drawn with the standard fonts; anything else would be saved as `?` (#125).
-        undrawable = self::undrawable(t, memo);
-        if let Some(c) = undrawable {
-            ui.label(egui::RichText::new(undrawable_message(c)).small().color(UNDRAWABLE));
-        }
-    });
     if cancel {
         view.content.draft = None;
         return (None, false);
@@ -903,66 +920,82 @@ pub(crate) fn family_menu(ui: &mut egui::Ui, family: &mut FontFamily) {
         .height(360.0)
         .close_behavior(egui::PopupCloseBehavior::CloseOnClickOutside)
         .show_ui(ui, |ui| {
-            ui.set_min_width(240.0);
-            // Opening the menu starts a new search with the caret in the box, so the font's name
-            // can be typed straight away.
-            let now = ui.input(|i| i.time);
-            let seen_id = search_id.with("seen");
-            let opened = ui.data(|d| d.get_temp::<f64>(seen_id)).is_none_or(|seen| now - seen > 0.3);
-            ui.data_mut(|d| d.insert_temp(seen_id, now));
-            ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
-            let mut query: String = if opened { String::new() } else { ui.data(|d| d.get_temp(search_id)).unwrap_or_default() };
-            let search = ui.add(egui::TextEdit::singleline(&mut query).hint_text(tl!("Search")).desired_width(f32::INFINITY));
-            if opened {
-                search.request_focus();
-            }
-            // Enter takes the first font the search leaves.
-            let entered = search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let want = query.trim().to_lowercase();
-            ui.data_mut(|d| d.insert_temp(search_id, query));
-            let mut hovered = None;
-            let mut first = None;
-            let mark = ui.visuals().weak_text_color();
-            let mut offer = |ui: &mut egui::Ui, f: FontFamily| {
-                if !(want.is_empty() || f.label().to_lowercase().contains(&want)) {
-                    return;
-                }
-                first.get_or_insert(f);
-                let resp = ui.selectable_label(*family == f, f.label());
-                // A small mark on the fonts that have Thai letters of their own.
-                if f.has_thai() {
-                    let at = Pos2::new(ui.max_rect().right() - 6.0, resp.rect.center().y);
-                    ui.painter().text(at, egui::Align2::RIGHT_CENTER, "TH", egui::FontId::proportional(9.0), mark);
-                }
-                if resp.hovered() {
-                    hovered = Some(f);
-                }
-                if resp.clicked() {
-                    *family = f;
-                    ui.close();
-                }
-            };
-            for f in FontFamily::bundled() {
-                offer(ui, f);
-            }
-            ui.separator();
-            // Names that start with what was typed come before those that only contain it.
-            let (starts, rest): (Vec<FontFamily>, Vec<FontFamily>) =
-                FontFamily::installed().into_iter().partition(|f| want.is_empty() || f.label().to_lowercase().starts_with(&want));
-            for f in starts.into_iter().chain(rest) {
-                offer(ui, f);
-            }
-            if entered && let Some(f) = first.filter(|_| !want.is_empty()) {
+            if let Some(f) = family_list(ui, search_id, Some(*family), &mut None) {
                 *family = f;
-                ui.close();
             }
-            note_hover(ui.ctx(), hovered);
         });
+}
+
+/// The inside of a font menu (Thai edition): a search box, the bundled families, then the
+/// families installed on this machine, Thai ones marked TH. Returns the family picked (a click,
+/// or Enter on the first match), which also closes the menu; `current` is ticked and `hovered`
+/// gets the family under the pointer.
+pub(crate) fn family_list(
+    ui: &mut egui::Ui,
+    search_id: egui::Id,
+    current: Option<FontFamily>,
+    hovered: &mut Option<FontFamily>,
+) -> Option<FontFamily> {
+    ui.set_min_width(240.0);
+    // Opening the menu starts a new search with the caret in the box, so the font's name
+    // can be typed straight away.
+    let now = ui.input(|i| i.time);
+    let seen_id = search_id.with("seen");
+    let opened = ui.data(|d| d.get_temp::<f64>(seen_id)).is_none_or(|seen| now - seen > 0.3);
+    ui.data_mut(|d| d.insert_temp(seen_id, now));
+    ui.ctx().request_repaint_after(std::time::Duration::from_millis(200));
+    let mut query: String = if opened { String::new() } else { ui.data(|d| d.get_temp(search_id)).unwrap_or_default() };
+    let search = ui.add(egui::TextEdit::singleline(&mut query).hint_text(tl!("Search")).desired_width(f32::INFINITY));
+    if opened {
+        search.request_focus();
+    }
+    // Enter takes the first font the search leaves.
+    let entered = search.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+    let want = query.trim().to_lowercase();
+    ui.data_mut(|d| d.insert_temp(search_id, query));
+    let mut picked = None;
+    let mut first = None;
+    let mark = ui.visuals().weak_text_color();
+    let mut offer = |ui: &mut egui::Ui, f: FontFamily| {
+        if !(want.is_empty() || f.label().to_lowercase().contains(&want)) {
+            return;
+        }
+        first.get_or_insert(f);
+        let resp = ui.selectable_label(current == Some(f), f.label());
+        // A small mark on the fonts that have Thai letters of their own.
+        if f.has_thai() {
+            let at = Pos2::new(ui.max_rect().right() - 6.0, resp.rect.center().y);
+            ui.painter().text(at, egui::Align2::RIGHT_CENTER, "TH", egui::FontId::proportional(9.0), mark);
+        }
+        if resp.hovered() {
+            *hovered = Some(f);
+        }
+        if resp.clicked() {
+            picked = Some(f);
+            ui.close();
+        }
+    };
+    for f in FontFamily::bundled() {
+        offer(ui, f);
+    }
+    ui.separator();
+    // Names that start with what was typed come before those that only contain it.
+    let (starts, rest): (Vec<FontFamily>, Vec<FontFamily>) =
+        FontFamily::installed().into_iter().partition(|f| want.is_empty() || f.label().to_lowercase().starts_with(&want));
+    for f in starts.into_iter().chain(rest) {
+        offer(ui, f);
+    }
+    if entered && let Some(f) = first.filter(|_| !want.is_empty()) {
+        picked = Some(f);
+        ui.close();
+    }
+    picked
 }
 
 /// The text size: a box to type any size from 1 to 500 points into (Enter, or a click away,
 /// applies it), with the usual sizes in a list beside it. Each applied size is one undo step.
-fn size_control(ui: &mut egui::Ui, size: &mut f64) {
+/// `hovered` gets the listed size under the pointer.
+pub(crate) fn size_control(ui: &mut egui::Ui, size: &mut f64, hovered: &mut Option<f64>) {
     let shown = |v: f64| if v.fract() == 0.0 { format!("{v:.0}") } else { format!("{v}") };
     let id = ui.make_persistent_id("font-size-typed");
     // What is in the box, and the size it was typed over. The text is kept while the box has the
@@ -970,7 +1003,8 @@ fn size_control(ui: &mut egui::Ui, size: &mut f64) {
     // elsewhere: a preset, or another item selected.
     let kept: Option<(String, f64)> = ui.data(|d| d.get_temp(id));
     let mut typed = kept.filter(|(_, over)| *over == *size).map_or_else(|| shown(*size), |(text, _)| text);
-    let resp = ui.add(egui::TextEdit::singleline(&mut typed).desired_width(34.0).horizontal_align(egui::Align::RIGHT));
+    // Narrow, with no unit beside it, so the Format text row keeps its width (the tip says what it is).
+    let resp = ui.add(egui::TextEdit::singleline(&mut typed).desired_width(30.0).horizontal_align(egui::Align::RIGHT)).tip(tl!("Font size"));
     // Clicking into the box selects the size, so typing replaces it.
     if resp.gained_focus()
         && let Some(mut state) = egui::TextEdit::load_state(ui.ctx(), resp.id)
@@ -989,69 +1023,118 @@ fn size_control(ui: &mut egui::Ui, size: &mut f64) {
     } else {
         ui.data_mut(|d| d.insert_temp(id, (typed, *size)));
     }
-    ui.label("pt");
     egui::ComboBox::from_id_salt("font-size").selected_text("").width(16.0).show_ui(ui, |ui| {
         for preset in [8.0, 9.0, 10.0, 11.0, 12.0, 14.0, 16.0, 18.0, 20.0, 24.0, 28.0, 36.0, 48.0, 72.0] {
-            ui.selectable_value(size, preset, format!("{preset} pt"));
+            if ui.selectable_value(size, preset, format!("{preset} pt")).hovered() {
+                *hovered = Some(preset);
+            }
         }
     });
 }
 
-/// The font menu entry under the pointer: (family, when the pointer reached it, when it was last
-/// seen there).
-type FamilyHover = (FontFamily, f64, f64);
-
-fn hover_id() -> egui::Id {
-    egui::Id::new("added-text-font-hover")
+/// What the pointer rests on in Format text, shown on the selected text or in the open editor
+/// before it is picked (Thai edition): a font, a size or a colour from their lists, or bold,
+/// italic or underline turned the other way. Nothing is applied until it is clicked.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub(crate) struct LookPreview {
+    pub family: Option<FontFamily>,
+    pub size: Option<f64>,
+    pub color: Option<[f64; 3]>,
+    pub bold: Option<bool>,
+    pub italic: Option<bool>,
+    /// Paragraphs only: added text has no underline yet.
+    pub underline: Option<bool>,
 }
 
-/// How long the pointer rests on a font before the selected text previews it (a sweep down the
-/// list loads nothing), and how long a preview outlives the last frame that saw the pointer there.
+impl LookPreview {
+    pub fn is_empty(&self) -> bool {
+        *self == Self::default()
+    }
+
+    /// `look` as previewed.
+    pub fn apply(&self, look: &mut AddedText) {
+        if let Some(f) = self.family {
+            look.family = f;
+        }
+        if let Some(v) = self.size {
+            look.size = v;
+        }
+        if let Some(c) = self.color {
+            look.color = c;
+        }
+        if let Some(b) = self.bold {
+            look.bold = b;
+        }
+        if let Some(i) = self.italic {
+            look.italic = i;
+        }
+    }
+}
+
+/// The preview under the pointer: (what, when the pointer reached it, when it was last seen there).
+type LookHover = (LookPreview, f64, f64);
+
+fn hover_id() -> egui::Id {
+    egui::Id::new("format-text-look-hover")
+}
+
+/// How long the pointer rests on a choice before the text previews it (a sweep down a list loads
+/// nothing), and how long a preview outlives the last frame that saw the pointer there.
 const HOVER_DWELL: f64 = 0.2;
 const HOVER_FRESH: f64 = 0.25;
 
-fn note_hover(ctx: &egui::Context, hovered: Option<FontFamily>) {
+/// Format text tells, each frame it is drawn, what the pointer rests on (`None`: nothing).
+pub(crate) fn note_hover(ctx: &egui::Context, hovered: Option<LookPreview>) {
     let now = ctx.input(|i| i.time);
-    let before: Option<FamilyHover> = ctx.data(|d| d.get_temp(hover_id()));
-    match hovered {
-        Some(f) => {
-            let since = before.filter(|(family, ..)| *family == f).map_or(now, |(_, since, _)| since);
-            ctx.data_mut(|d| d.insert_temp::<FamilyHover>(hover_id(), (f, since, now)));
+    let before: Option<LookHover> = ctx.data(|d| d.get_temp(hover_id()));
+    match hovered.filter(|h| !h.is_empty()) {
+        Some(h) => {
+            let since = before.filter(|(was, ..)| *was == h).map_or(now, |(_, since, _)| since);
+            ctx.data_mut(|d| d.insert_temp::<LookHover>(hover_id(), (h, since, now)));
             // Wake up for the preview to start, and afterwards to notice the pointer leaving.
             ctx.request_repaint_after(std::time::Duration::from_millis(100));
         }
-        None if before.is_some() => ctx.data_mut(|d| d.remove::<FamilyHover>(hover_id())),
+        None if before.is_some() => {
+            ctx.data_mut(|d| d.remove::<LookHover>(hover_id()));
+            ctx.request_repaint();
+        }
         None => {}
     }
 }
 
-/// The font the pointer rests on in the font menu, to preview on the selected text (Add text)
-/// or in the open editor (Edit text).
-pub(crate) fn previewed_family(ctx: &egui::Context) -> Option<FontFamily> {
+/// The look the pointer rests on in Format text, to preview on the selected text (Add text) or in
+/// the open editor (Edit text).
+pub(crate) fn previewed_look(ctx: &egui::Context) -> Option<LookPreview> {
     let now = ctx.input(|i| i.time);
-    let (family, since, seen): FamilyHover = ctx.data(|d| d.get_temp(hover_id()))?;
+    let (look, since, seen): LookHover = ctx.data(|d| d.get_temp(hover_id()))?;
     if now - seen > HOVER_FRESH {
-        // The menu closed with the pointer on an entry.
-        ctx.data_mut(|d| d.remove::<FamilyHover>(hover_id()));
+        // The panel or a menu closed with the pointer on a choice.
+        ctx.data_mut(|d| d.remove::<LookHover>(hover_id()));
         ctx.request_repaint();
         return None;
     }
     ctx.request_repaint_after(std::time::Duration::from_millis(100));
-    (now - since >= HOVER_DWELL).then_some(family)
+    (now - since >= HOVER_DWELL).then_some(look)
 }
 
-/// The selected text as it would look in the font the pointer rests on in the font menu, drawn
-/// over the page until the pointer moves on. Nothing is changed in the document.
+/// The selected text as it would look with what the pointer rests on in Format text, drawn over
+/// the page until the pointer moves on. Nothing is changed in the document.
 /// Returns the box the previewed text takes, for the selection frame to follow.
-fn paint_family_preview(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, t: &AddedText) -> Option<Rect> {
-    let family = previewed_family(ui.ctx()).filter(|f| *f != t.family)?;
+fn paint_look_preview(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, t: &AddedText) -> Option<Rect> {
+    let preview = previewed_look(ui.ctx())?;
+    let mut look = t.clone();
+    preview.apply(&mut look);
+    if look == *t {
+        return None;
+    }
     let page_width = info.pages.get(page).map(|p| p.width as f64);
-    let shown = restyled(t, AddedText { family, ..t.clone() }, page_width);
+    let shown = restyled(t, look.clone(), page_width);
     let (old, new) = (screen_rect(xf, info, page, t.rect), screen_rect(xf, info, page, shown.rect));
     let zoom = xf.rect.width() / xf.pw.max(1.0);
-    let font = crate::theme::document_font(ui.ctx(), family, t.bold, t.italic, (t.size as f32 * zoom).max(4.0));
-    let [cr, cg, cb] = t.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
-    let galley = painter.layout(t.text.clone(), font, Color32::from_rgb(cr, cg, cb), new.width().max(8.0));
+    let font = crate::theme::document_font(ui.ctx(), look.family, look.bold, look.italic, (look.size as f32 * zoom).max(4.0));
+    let [cr, cg, cb] = look.color.map(|v| (v.clamp(0.0, 1.0) * 255.0) as u8);
+    let color = Color32::from_rgb(cr, cg, cb);
+    let galley = painter.layout(t.text.clone(), font, color, new.width().max(8.0));
     let x = match t.align {
         TextAlign::Left | TextAlign::Justify => new.left(),
         TextAlign::Center => new.center().x - galley.size().x / 2.0,
@@ -1059,58 +1142,8 @@ fn paint_family_preview(ui: &egui::Ui, painter: &egui::Painter, xf: &PageXform, 
     };
     let text = Rect::from_min_size(Pos2::new(x, new.top()), galley.size());
     painter.rect_filled(old.union(new).union(text).expand(2.0), CornerRadius::ZERO, Color32::WHITE);
-    painter.galley(text.min, galley, Color32::BLACK);
+    painter.galley(text.min, galley, color);
     Some(new.union(text))
-}
-
-/// Format text (shown in the Edit panel while a text item is selected, or for new text).
-/// Returns the changed style; for a selected item the caller turns it into an update.
-pub(crate) fn format_panel(ui: &mut egui::Ui, t: &Tokens, style: &AddedText) -> Option<AddedText> {
-    format_panel_with(ui, t, style, true)
-}
-
-/// [`format_panel`]; `document_families` offers the craft-fonts and installed families too
-/// (Add text draws them; Edit text has only the standard ones).
-pub(crate) fn format_panel_with(ui: &mut egui::Ui, t: &Tokens, style: &AddedText, document_families: bool) -> Option<AddedText> {
-    let mut s = style.clone();
-    widgets::section_title(ui, tl!("Format text"));
-    ui.horizontal(|ui| {
-        if document_families {
-            family_menu(ui, &mut s.family);
-        } else {
-            egui::ComboBox::from_id_salt("font-family").selected_text(s.family.label()).width(130.0).show_ui(ui, |ui| {
-                for f in [FontFamily::Helvetica, FontFamily::Times, FontFamily::Courier] {
-                    ui.selectable_value(&mut s.family, f, f.label());
-                }
-            });
-        }
-        size_control(ui, &mut s.size);
-    });
-    ui.horizontal(|ui| {
-        if ui.selectable_label(s.bold, egui::RichText::new("B").strong()).tip(tl!("Bold")).clicked() {
-            s.bold = !s.bold;
-        }
-        if ui.selectable_label(s.italic, egui::RichText::new("I").italics()).tip(tl!("Italic")).clicked() {
-            s.italic = !s.italic;
-        }
-        ui.separator();
-        for (a, icon, tip) in [
-            (TextAlign::Left, "align-left", tl!("Align left")),
-            (TextAlign::Center, "align-center", tl!("Centre")),
-            (TextAlign::Right, "align-right", tl!("Align right")),
-            (TextAlign::Justify, "align-justify", tl!("Justify")),
-        ] {
-            if crate::icons::button(ui, icon, 26.0, s.align == a, tip).clicked() {
-                s.align = a;
-            }
-        }
-    });
-    let c = s.color;
-    if let Some(picked) = crate::comments::swatch_grid(ui, Some(c)) {
-        s.color = picked;
-    }
-    ui.label(egui::RichText::new(tl!("Thai and Arabic use regular fallback fonts when available.")).small().color(t.text_faint));
-    (s != *style).then_some(s)
 }
 
 /// How to use the tools, under the Add content list.
@@ -1299,6 +1332,45 @@ impl crate::PdfCraftApp {
             self.views[i].content.select_added = Some((page, before));
             self.left = crate::LeftPanel::Tool("edit");
             self.left_open = true;
+        }
+    }
+
+    /// Whether ⌘V / Ctrl+V was let go this frame. egui-winit swallows that press (with a Paste
+    /// event only if the clipboard holds text), while a plain V press always comes through: a
+    /// release of V with no press of V since the last one is the shortcut, even when ⌘ or Ctrl
+    /// was let go first. Read every frame, dialogs or not, so a press is never missed.
+    pub(crate) fn paste_key_released(&mut self, ctx: &egui::Context) -> bool {
+        let mut released = false;
+        ctx.input(|inp| {
+            for e in &inp.events {
+                if let egui::Event::Key { key: egui::Key::V, pressed, .. } = e {
+                    released |= !*pressed && !self.v_pressed;
+                    self.v_pressed = *pressed;
+                }
+            }
+        });
+        released
+    }
+
+    /// ⌘V / Ctrl+V with a picture on the system clipboard (a screenshot, a picture copied in a
+    /// browser) places it on the current page, as Add Image does.
+    /// Organize Pages keeps ⌘V for pages, Prepare Form for fields, and text fields for text.
+    pub(crate) fn paste_image_key(&mut self, i: usize, ctx: &egui::Context, pasted: bool) {
+        let free = self.dialog.is_none() && !self.palette_open && !ctx.egui_wants_keyboard_input();
+        let Some(view) = self.views.get(i) else { return };
+        if !pasted || !free || view.organize || view.forms.focus.is_some() || self.is_preparing() {
+            return;
+        }
+        let clip = match self.clipboard_override.clone() {
+            Some(c) => Some(c),
+            #[cfg(not(target_arch = "wasm32"))]
+            None if self.system_clipboard => crate::create_ui::read_clipboard(),
+            None => None,
+        };
+        let Some(crate::create_ui::Clip::Image { width, height, rgba }) = clip else { return };
+        match crate::create_ui::png_from_rgba(width, height, &rgba) {
+            Ok(png) => self.add_image("Pasted image.png".into(), png),
+            Err(e) => self.notify_fmt("Couldn't read {name}: {e}", &[("name", tl!("Clipboard")), ("e", &e)]),
         }
     }
 }

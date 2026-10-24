@@ -444,6 +444,12 @@ fn input(s: &mut ObjectSelection, ui: &egui::Ui, resp: &egui::Response, xf: &Pag
             view.current = page;
             return true;
         }
+    }
+    // A closed paragraph's width handle reaches past its box, and a press there rewraps the
+    // paragraph (as in `edit_text_ui`) instead of starting an area selection (#2276).
+    let on_edge = view.line_editor.as_ref().is_none_or(|e| e.page != page)
+        && crate::edit_text_ui::grabs_edge(xf, info, page, objects.iter().filter(|o| o.target.kind == ObjectKind::Text).map(|o| o.rect), p);
+    if hit.is_some() || on_edge {
         return false;
     }
     leave_single(view);
@@ -521,17 +527,35 @@ pub(crate) fn delete_keys(ctx: &egui::Context, view: &mut DocView) {
         return;
     }
     let Some(page) = view.objects.page else { return };
-    let [one] = view.objects.selected.as_slice() else { return };
-    if one.target.kind != ObjectKind::Text {
+    if view.objects.selected.is_empty() {
         return;
     }
-    let block = one.target.index;
     use egui::{Key, Modifiers};
     if !ctx.input_mut(|i| i.consume_key(Modifiers::NONE, Key::Delete) || i.consume_key(Modifiers::NONE, Key::Backspace)) {
         return;
     }
+    let mut edits = delete_edits(page, &view.objects.selected);
     view.objects.clear();
-    view.pending_edit = Some(Edit::EditTextBlock { page, block, text: String::new(), style: Default::default() });
+    view.pending_edit = match edits.len() {
+        1 => edits.pop(),
+        _ => Some(Edit::Batch { label: "Delete text".into(), edits }),
+    };
+}
+
+/// The edits that delete `selected` on `page` (Thai edition), in an order where each index still
+/// means what it did when selected: paragraphs, then images, then added items, each kind last
+/// first, so a deletion never shifts an index still to come.
+fn delete_edits(page: usize, selected: &[EditableObject]) -> Vec<Edit> {
+    let indexes = |kind: ObjectKind| {
+        let mut v: Vec<usize> = selected.iter().filter(|o| o.target.kind == kind).map(|o| o.target.index).collect();
+        v.sort_unstable_by(|a, b| b.cmp(a));
+        v.dedup();
+        v
+    };
+    let text = indexes(ObjectKind::Text).into_iter().map(|block| Edit::EditTextBlock { page, block, text: String::new(), style: Default::default() });
+    let images = indexes(ObjectKind::Image).into_iter().map(|index| Edit::EditPageImage { page, index, change: pdfcraft_engine::ImageEdit::Delete });
+    let added = indexes(ObjectKind::Added).into_iter().map(|index| Edit::DeleteContent { page, index });
+    text.chain(images).chain(added).collect()
 }
 
 pub(crate) fn paint(painter: &egui::Painter, xf: &PageXform, page: usize, info: &DocInfo, selection: &ObjectSelection) {

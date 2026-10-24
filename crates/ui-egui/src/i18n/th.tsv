@@ -1507,6 +1507,7 @@
 	Protect with password	ป้องกันด้วยรหัสผ่าน
 	Radio button	ปุ่มตัวเลือก
 	Recognize text	รู้จำข้อความ
+	Delete text	ลบข้อความ
 	Recognize text in multiple files…	รู้จำข้อความในหลายไฟล์…
 	Recognize text…	รู้จำข้อความ…
 	Rectangle	สี่เหลี่ยม
@@ -2700,3 +2701,84 @@ key	Space	Space
 @id	file.word_count	นับคำ…
 theme	Appearance	ลักษณะที่ปรากฏ
 	This file has Type 3 text, which Windows printing can't handle, so it is printed as an image (600 dpi).	ไฟล์นี้มีข้อความแบบอักษร Type 3 ซึ่งการพิมพ์ของ Windows รองรับไม่ได้ จึงพิมพ์เป็นรูปภาพแทน (600 dpi)
+
+# From upstream PdfCraft (entries the edition's catalog didn't have).
+	Show gaps between pages	แสดงช่องว่างระหว่างหน้า
+	Hide gaps to join page edges. Margins inside the PDF remain unchanged.	ซ่อนช่องว่างเพื่อให้ขอบหน้าต่อกัน ระยะขอบภายใน PDF ยังคงเหมือนเดิม
+
+# PdfCraft v0.12.0 and v0.13.0 strings (Thai edition, translated from the English meaning).
+	Calculation order	ลำดับการคำนวณ
+	Fix order	แก้ลำดับ
+	Move only what must move, so every field calculates after the fields it reads.	ย้ายเฉพาะที่จำเป็น เพื่อให้ทุกช่องคำนวณหลังช่องที่ตัวเองอ่านค่า
+	Earlier in calculation order	เลื่อนขึ้นในลำดับการคำนวณ
+	Later in calculation order	เลื่อนลงในลำดับการคำนวณ
+	Too early	เร็วเกินไป
+	Reads {name}, which calculates later, so it shows an old value.	อ่านค่าจาก {name} ซึ่งคำนวณทีหลัง จึงแสดงค่าเก่า
+	Loop	วนซ้ำ
+	Reads {names}, which read it back. No order can fix a loop: change one of the formulas.	อ่านค่าจาก {names} ซึ่งอ่านค่ากลับมาที่ช่องนี้ ลำดับใดก็แก้การวนซ้ำไม่ได้ ต้องแก้สูตรใดสูตรหนึ่ง
+	Not in order	ไม่อยู่ในลำดับ
+	Missing from the calculation order saved in the PDF: other PDF viewers may not calculate it.	ไม่อยู่ในลำดับการคำนวณที่บันทึกใน PDF โปรแกรมอ่าน PDF อื่นอาจไม่คำนวณช่องนี้
+	Back to Prepare a form	กลับไปที่เตรียมแบบฟอร์ม
+	No field in this form calculates its value yet. Give a field a calculation on the Calculate tab of its properties, and it shows here.	ยังไม่มีช่องใดในแบบฟอร์มนี้ที่คำนวณค่า ตั้งการคำนวณให้ช่องได้ที่แท็บคำนวณในคุณสมบัติของช่อง แล้วช่องนั้นจะแสดงที่นี่
+	{names} and {last}	{names} และ {last}
+	{field} reads no other field	{field} ไม่อ่านค่าจากช่องอื่น
+	{field} reads {fields}	{field} อ่านค่าจาก {fields}
+	No field reads it	ไม่มีช่องใดอ่านค่าจากช่องนี้
+	The order saved in the PDF needs tidying	ลำดับที่บันทึกใน PDF ควรจัดให้เรียบร้อย
+	Moves only what must move	ย้ายเฉพาะที่จำเป็น
+	Every field calculates after the fields it reads.	ทุกช่องคำนวณหลังช่องที่ตัวเองอ่านค่า
+	Every field outside a loop calculates after the fields it reads.	ทุกช่องที่ไม่อยู่ในการวนซ้ำคำนวณหลังช่องที่ตัวเองอ่านค่า
+	{field} reads its own value	{field} อ่านค่าของตัวเอง
+	{fields} read each other	{fields} อ่านค่าซึ่งกันและกัน
+	No order can fix a loop. Change one of the formulas.	ลำดับใดก็แก้การวนซ้ำไม่ได้ ต้องแก้สูตรใดสูตรหนึ่ง
+	Edit {field}'s formula	แก้สูตรของ {field}
+	Order · top calculates first	ลำดับ · บนสุดคำนวณก่อน
+	Script	สคริปต์
+	Links on page	ลิงก์บนหน้า
+	Show on the page which fields each field reads	แสดงบนหน้าว่าแต่ละช่องอ่านค่าจากช่องใด
+	Drag a field to move it, or select it and press {up} or {down}.	ลากช่องเพื่อย้าย หรือเลือกช่องแล้วกด {up} หรือ {down}
+	Shrink the page content to make room for the header and footer	ย่อเนื้อหาของหน้าให้มีที่ว่างสำหรับหัวกระดาษและท้ายกระดาษ
+	Printer default	ค่าเริ่มต้นของเครื่องพิมพ์
+	Layer options	ตัวเลือกเลเยอร์
+	Reset to Initial Visibility	คืนการแสดงเลเยอร์เป็นค่าเริ่มต้น
+	Reading the printer's settings…	กำลังอ่านการตั้งค่าเครื่องพิมพ์…
+	The document's security settings don't allow printing	การตั้งค่าความปลอดภัยของเอกสารไม่อนุญาตให้พิมพ์
+	Set calculation order	ตั้งลำดับการคำนวณ
+	Always use my default zoom and page layout	ใช้การซูมและรูปแบบหน้าที่ฉันตั้งไว้เสมอ
+@plural	{n} calculation now uses the new name.|{n} calculations now use the new name.	การคำนวณ {n} รายการใช้ชื่อใหม่แล้ว
+@plural	The calculation order has {n} entry that calculates nothing. Fix order removes it.|The calculation order has {n} entries that calculate nothing. Fix order removes them.	ลำดับการคำนวณมี {n} รายการที่ไม่ได้คำนวณอะไร แก้ลำดับจะเอาออกให้
+@plural	{fields} reads it|{fields} read it	{fields} อ่านค่าจากช่องนี้
+@plural	{n} field shows an old value|{n} fields show old values	{n} ช่องแสดงค่าเก่า
+@plural	{field} calculates before {fields}, which it reads.|{field} calculates before {fields}, which it reads.	{field} คำนวณก่อน {fields} ที่ตัวเองอ่านค่า
+@plural	{n} more field calculates too early.|{n} more fields calculate too early.	มีอีก {n} ช่องที่คำนวณเร็วเกินไป
+@plural	{fields} is missing from the order saved in the PDF, so other PDF viewers may not calculate it.|{fields} are missing from the order saved in the PDF, so other PDF viewers may not calculate them.	{fields} ไม่อยู่ในลำดับที่บันทึกใน PDF โปรแกรมอ่าน PDF อื่นจึงอาจไม่คำนวณ
+	Bulleted list	รายการสัญลักษณ์
+	Numbered list	รายการลำดับเลข
+	Alignment	การจัดแนว
+	Superscript	ตัวยก
+	Subscript	ตัวห้อย
+	Paragraph spacing	ระยะห่างย่อหน้า
+	Less	น้อยลง
+	Other options	ตัวเลือกอื่น
+	Thumbnail size	ขนาดภาพขนาดย่อ
+	Smaller thumbnails	ภาพขนาดย่อเล็กลง
+	Larger thumbnails	ภาพขนาดย่อใหญ่ขึ้น
+	Reshape comment	ปรับรูปร่างความคิดเห็น
+	Add text field table	เพิ่มตารางช่องข้อความ
+	Text field table	ตารางช่องข้อความ
+	Text Field Table	ตารางช่องข้อความ
+	Columns	คอลัมน์
+	Row spacing	ระยะห่างแถว
+	Column spacing	ระยะห่างคอลัมน์
+	First row number	เลขแถวแรก
+	Column widths	ความกว้างคอลัมน์
+	Distribute evenly	เฉลี่ยให้เท่ากัน
+	Field names	ชื่อช่อง
+	N or {row} is the row number, {col} the column number, {seq} the cell number. With none of them, the row number goes last.	N หรือ {row} คือเลขแถว {col} คือเลขคอลัมน์ {seq} คือเลขเซลล์ ถ้าไม่ใส่ตัวใดเลย เลขแถวจะต่อท้ายชื่อ
+	Column {n}	คอลัมน์ {n}
+	Add fields	เพิ่มช่อง
+	the rows are too short: make the area taller, or use fewer rows or less row spacing	แถวเตี้ยเกินไป ขยายพื้นที่ให้สูงขึ้น หรือลดจำนวนแถวหรือระยะห่างแถว
+	a column is too narrow: make the area wider, give the column more of it, or use fewer columns or less column spacing	คอลัมน์แคบเกินไป ขยายพื้นที่ให้กว้างขึ้น เพิ่มความกว้างให้คอลัมน์นั้น หรือลดจำนวนคอลัมน์หรือระยะห่างคอลัมน์
+	field names can't contain a period: {name}	ชื่อช่องมีจุดไม่ได้: {name}
+	two cells would both be named {name}	จะมีสองเซลล์ที่ชื่อ {name} ซ้ำกัน
+	a field named {name} already exists	มีช่องชื่อ {name} อยู่แล้ว
